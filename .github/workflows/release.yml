@@ -1,0 +1,68 @@
+name: Prepare unsigned Beta release draft
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing reviewed Beta tag, e.g. v0.5.0-beta.1 (creates a draft only)'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: beta-release-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Validate tag input
+        shell: zsh {0}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ '^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$' ]] || exit 1
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify source and tag version
+        shell: zsh {0}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" ]] || exit 1
+          git merge-base --is-ancestor HEAD origin/main
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)
+          [[ "$RELEASE_TAG" == "v$APP_VERSION-beta."* ]] || exit 1
+          [[ -z "$(git status --porcelain)" ]] || exit 1
+      - name: Privacy review guard
+        run: |
+          ruby scripts/privacy_check.rb --self-test
+          ruby scripts/test_privacy_check.rb
+          ruby scripts/privacy_check.rb --history
+      - name: Synthetic tests in English and Chinese
+        run: zsh scripts/test.sh --all-locales
+      - name: Build and verify ad-hoc Beta
+        run: zsh scripts/build_dmg.sh
+      - name: Create draft prerelease (never overwrites an existing release)
+        shell: zsh {0}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            print -u2 'A release already exists. Review it manually; it will not be overwritten.'
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" dist/AgentJournal-*-macOS-arm64-adhoc.zip \
+            dist/AgentJournal-*-macOS-arm64-adhoc.zip.sha256 dist/AgentJournal-*-macOS-arm64-adhoc.json \
+            dist/AgentJournal-*-macOS-arm64-adhoc.dmg dist/AgentJournal-*-macOS-arm64-adhoc.dmg.sha256 \
+            dist/AgentJournal-*-macOS-arm64-adhoc.dmg.json \
+            --verify-tag --draft --prerelease --title "AgentJournal $RELEASE_TAG — unsigned Beta" \
+            --notes-file docs/BETA_RELEASE_NOTES.md

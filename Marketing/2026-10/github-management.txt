@@ -1,0 +1,71 @@
+AgentJournal 项目管理指南 · 2026-10-04
+
+当前已核实
+DavidSi123456/AgentJournal 属于个人账号，当前为 private，默认分支 main。本次只读取仓库元数据，没有修改可见性、权限、分支规则或邀请他人；未核实账户付费套餐。
+
+一、先区分三个词
+git pull：拉取并整合远端更新到对方本地。有读取权限就可下载，通常不需要你逐次批准。
+Pull Request（PR）：建议把一组修改合并进你的仓库。可以审查、要求修改、关闭不合并，或合并。
+git push：把提交写入远端。需要写权限。PR 不是直接 push 到 main；关闭 PR 也不等于撤销协作者权限。
+
+二、public／private 到底有什么权限？
+public，未授权陌生人：可阅读、克隆、fork，在自己的 fork 修改并发 PR；不会因看到仓库就获得对你仓库直接 push 或 merge 的权限。
+private，只分享链接：未获授权的人不能看源码。链接不是邀请，也不会自动授予权限。
+个人 private，接受协作者邀请：会获得读取和写入权限，不是“仅查看”。保护 main 也不会把整个协作者变成只读；他仍可能写其他分支。
+Organization private，可单独授予 Read：适合只看源码、讨论或提交 fork PR 的人；Triage 适合管理 issue／PR，Write 适合开发者，Admin 只给可信的管理者。
+
+移除权限只阻止后续访问，不能收回已经下载到对方电脑的源码。不要把 private 当成防止复制的 DRM。
+试用者：发 Beta 安装包即可，不必邀请为源码协作者。
+外部贡献者：若以后决定公开仓库，通常采用 fork → PR，不授予原仓库写权限。
+少数核心开发者：确有需要才授予写权限，同时保护 main。
+需要“私下只读分享源码”：考虑 Organization 的 Read 角色。本次不执行仓库转移或套餐变更。
+
+三、如何关闭直接 push 的权限？
+目标 A：完全不给某个人写入整个仓库
+个人仓库 Settings → Collaborators，检查并移除不需要写权限的协作者。个人 private 没有把协作者降成 Read 的选项；只读需求用 Organization。
+同时检查带写权限的 Deploy keys、已安装的 GitHub Apps，以及给自动化使用的令牌授权。不要把令牌贴进 issue、PR 或聊天里。人员权限撤销不必然收回独立密钥／App 的授权。
+
+目标 B：允许开发者写自己的分支，但不能绕过 PR 直接更新 main
+Settings → Rules → Rulesets → New branch ruleset。
+规则名称可用 Protect main；Enforcement 选 Active；目标精确包含 main。
+启用 Require a pull request before merging、Require status checks to pass、Require conversation resolution、Block force pushes，并限制删除 main。
+必需检查选择近期实际出现的 CI job“test”。当前工作流叫 macOS build and tests；“Swift tests”是步骤，不应误当独立 status check。
+不要把所有 Write 协作者加进 bypass 列表。保留最小绕过范围，确需管理员例外时优先使用 For pull requests only，保留 PR 记录。
+
+单人维护提醒：你不能批准自己的 PR。暂时只有你一个维护者，可以先设 PR 必须有、审批人数 0、CI 必须通过；别人 PR 由你手工审阅合并。有人能独立审查后再设 1 次批准并丢弃修改后的旧批准。也可设计仅限管理员的 PR-only 例外，但不要让普通写入者绕过。
+若你要“只有我能合并”，还需要进一步限制 main 更新者／仅赋予所需角色，或不给别人 Write；仅仅要求 PR 和 CI 不等于只有你能合并。
+
+套餐注意：公开仓库的规则集可用于 GitHub Free；private 仓库需要相应 Pro／Team／Enterprise 套餐。个人 private 通常看 Pro，Organization private 看 Team。未查到你的套餐，不假设规则已生效。找不到可用保护时，不要为解决权限问题贸然把源码改 public；先不给别人写权限。
+这里主要用 branch ruleset。“Push ruleset”是文件路径／扩展名／大小等限制，不是本场景的通用“禁止直接推 main”开关。
+
+四、一个适合 AgentJournal 的 PR 流程
+1. 较大功能先开 issue：问题、期望行为、当前版本、隐私影响。小修复可直接 PR。
+2. 每个 PR 做一个聚焦改动，提交到 feature 分支／fork，不直接改 main。
+3. 要求写明改动目的、复现方式、验证结果；解析器、缓存、备份、时区的改动必须补合成回归用例，不能提交真人对话。
+4. 先读 Files changed，再看 CI。重点审查日志读取边界、模型输入／工具权限、备份恢复、scripts 和 .github/workflows。CI 绿灯不代替代码审查。
+5. 外部 fork 的工作流需要批准时，先检查代码和工作流是否安全；不要把未审查代码放到带模型账号／发布凭据的个人环境运行，也不要用 pull_request_target 执行对方代码并暴露 secrets。
+6. 不符合预期：Request changes，明确指出需要修复什么；不准备收录的改动说明原因后 Close PR，不删除对方本地工作。
+7. 验证通过后手动 Squash and merge；删除已合并的 feature 分支是可选清理步骤。先核对目标，main 不删除。
+8. 发布：补 CHANGELOG、版本、合成 UI 检查、安装包校验，再创建 tag／Release。未公证、仅 arm64 等限制写清楚；不把 dist 二进制或私人 journal 直接塞进源码提交。
+
+我建议你现在的设置
+继续 private；试用者发包；暂不随意添加 Collaborators。
+有合适套餐时启用 main 保护，保留已有只读 CI；自己也走 feature → PR → CI → 手动合并。
+先保持手动合并；核心协作者稳定后，再讨论审批人数、CODEOWNERS 和组织角色。
+CODEOWNERS 是审查分工，不是授予／撤销 push 权限的工具。
+
+官方依据（2026-10-04 核对）
+个人仓库的协作者权限、移除后的本地副本：
+https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/repository-access-and-collaboration/permission-levels-for-a-personal-account-repository
+公开／私有仓库与 PR：
+https://docs.github.com/en/repositories/creating-and-managing-repositories/about-repositories
+Organization 的 Read／Triage／Write／Maintain／Admin：
+https://docs.github.com/en/organizations/managing-user-access-to-your-organizations-repositories/managing-repository-roles/repository-roles-for-an-organization
+规则集适用套餐、branch 与 push 的区别：
+https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets
+创建规则集与绕过设置：
+https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository
+PR／检查／强推等规则：
+https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets
+批准外部 fork 工作流：
+https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks

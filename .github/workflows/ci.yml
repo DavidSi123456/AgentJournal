@@ -1,0 +1,47 @@
+name: macOS build and tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Privacy guard (no secret values printed)
+        run: |
+          ruby scripts/privacy_check.rb --self-test
+          ruby scripts/test_privacy_check.rb
+          ruby scripts/privacy_check.rb --history
+      - name: Validate packaging scripts
+        run: |
+          zsh -n scripts/build_app.sh
+          zsh -n scripts/verify_artifact.sh
+          zsh -n scripts/build_dmg.sh
+          zsh -n scripts/verify_dmg.sh
+          zsh -n scripts/test.sh
+      - name: Signing configuration must fail closed
+        run: |
+          if zsh scripts/build_app.sh --sign; then exit 1; fi
+          if zsh scripts/build_app.sh --notarize; then exit 1; fi
+          if zsh scripts/build_dmg.sh --sign; then exit 1; fi
+          if zsh scripts/build_dmg.sh --notarize; then exit 1; fi
+      - name: Swift tests in English and Chinese (synthetic data, no model calls)
+        run: zsh scripts/test.sh --all-locales
+      - name: Build ZIP and read-only DMG test installers
+        run: zsh scripts/build_dmg.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AgentJournal-macOS-arm64-adhoc-test-build
+          path: |
+            dist/AgentJournal-*-macOS-arm64-adhoc.zip
+            dist/AgentJournal-*-macOS-arm64-adhoc.zip.sha256
+            dist/AgentJournal-*-macOS-arm64-adhoc.json
+            dist/AgentJournal-*-macOS-arm64-adhoc.dmg
+            dist/AgentJournal-*-macOS-arm64-adhoc.dmg.sha256
+            dist/AgentJournal-*-macOS-arm64-adhoc.dmg.json
+          if-no-files-found: error

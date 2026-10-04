@@ -1,0 +1,19 @@
+AgentJournal for Apple Silicon · macOS 14 or later
+
+1. Quit an older AgentJournal before updating.
+2. Drag AgentJournal.app to Applications. Replace the old application if asked.
+3. Eject this disk image, then open AgentJournal from Applications / Launchpad.
+
+Replacing the app does not erase your local journal. For extra safety, use
+Data & requests → Backup & restore → Export full backup before updating.
+An exported backup is private and unencrypted; do not publish it.
+
+AD-HOC BETA: a filename ending in -adhoc.dmg is a local test build, not an
+Apple-notarized public release. It may be blocked on a downloaded/quarantined
+copy. Never disable Gatekeeper globally. Use source builds or wait for an
+explicitly notarized release if macOS blocks this Beta.
+
+正式公开发行应使用标为 -notarized.dmg 的版本；-adhoc.dmg 只是未公证测试版。
+更新前退出旧版，将应用拖入 Applications，推出磁盘映像后从启动台打开。
+替换应用不会删除本机日志；建议先在“数据与调用 → 备份恢复”导出备份。
+备份含私人内容且未加密，不要上传 GitHub。不要全局关闭 macOS 安全检查。
