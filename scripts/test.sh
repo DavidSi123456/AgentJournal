@@ -21,6 +21,8 @@ swiftc -swift-version 5 -parse-as-library -o "$PROJECT_DIR/.build/JournalChecks"
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalStore.swift" \
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalAgent.swift" \
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalWorkflow.swift" \
+    "$PROJECT_DIR/Sources/AgentJournalKit/JournalThreadProgress.swift" \
+    "$PROJECT_DIR/Sources/AgentJournalKit/JournalThreadProgressView.swift" \
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalReports.swift" \
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalAppearance.swift" \
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalReportsView.swift" \
@@ -34,6 +36,7 @@ swiftc -swift-version 5 -parse-as-library -o "$PROJECT_DIR/.build/JournalChecks"
     "$PROJECT_DIR/Tests/AgentJournalKitTests/JournalTests.swift" \
     "$PROJECT_DIR/Tests/AgentJournalKitTests/AgentTests.swift" \
     "$PROJECT_DIR/Tests/AgentJournalKitTests/WorkflowTests.swift" \
+    "$PROJECT_DIR/Tests/AgentJournalKitTests/ProgressTests.swift" \
     "$PROJECT_DIR/Tests/AgentJournalKitTests/DiagnosticsTests.swift" \
     "$PROJECT_DIR/Tests/AgentJournalKitTests/CheckRunner.swift"
 if $AJ_CHECK_LOCALES; then

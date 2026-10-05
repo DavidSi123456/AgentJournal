@@ -10,6 +10,10 @@ public final class JournalStore: ObservableObject {
     @Published private(set) var isSummarizing = false
     @Published private(set) var isAdvising = false
     @Published private(set) var isReporting = false
+    @Published private(set) var isDraftingTasks = false
+    @Published private(set) var threadProgress = JournalProgressState()
+    @Published private(set) var progressStorageError: String?
+    @Published var taskTreeError: String?
     @Published private(set) var workflow = JournalWorkflowState() {
         didSet {
             cachedAgentInput = nil
@@ -68,10 +72,12 @@ public final class JournalStore: ObservableObject {
     private let summarizer: JournalSummarizing
     private let advisor: JournalAgentAdvising
     private let reporter: JournalPeriodReporting
+    private let progressDrafter: JournalProgressDrafting
     private let dataURL: URL
     private let indexURL: URL
     private let agentHistoryURL: URL
     private let workflowURL: URL
+    private let threadProgressURL: URL
     private var expectedJournalBytes: Data?
     private var canSaveAgentHistory = true
     private var isInitializing = true
@@ -83,13 +89,34 @@ public final class JournalStore: ObservableObject {
     private var generationTask: Task<Void, Never>?
     private var advisorTask: Task<Void, Never>?
     private var reportTask: Task<Void, Never>?
+    private var taskTreeTask: Task<Void, Never>?
     // Activities indexed under the previous timezone, kept until the next successful scan.
     private var timeZoneMigrationSource: [JournalActivity]?
     private var draftTimeZones: [String: [String: JournalDraft]] = [:]
     private var cachedAgentInput: (input: JournalAgentInput, fingerprint: String, expires: Date)?
     private var resultFingerprints: [UUID: String] = [:]
     private var archiveHistoryLoaded = false
-    var isModelBusy: Bool { isSummarizing || isAdvising || isReporting }
+    var isModelBusy: Bool { isSummarizing || isAdvising || isReporting || isDraftingTasks }
+    var canManageProgress: Bool { canManageWorkflow && progressStorageError == nil }
+    // Manual trees live in their own file. Unrelated model requests must not lock
+    // this editor; only scanning or a tree draft can change its editing baseline.
+    var canEditThreadPlan: Bool { canManageProgress && !isLoading && !isDraftingTasks }
+    var canDraftThreadPlan: Bool { canManageProgress && !isLoading && !isModelBusy && !needsLanguageSetup && !needsOnboarding }
+    var threadPlanStorageMessage: String? {
+        progressStorageError ?? workflowError ?? archiveHistoryError
+            ?? (canEdit ? nil : errorMessage ?? "任务树暂时不能保存，请检查存储或等待读取结束。")
+    }
+    var threadPlanBackgroundMessage: String? {
+        if isLoading { return "正在读取线程记录，读取完成后可编辑任务树。" }
+        if isDraftingTasks { return "正在生成任务树，完成或停止后可编辑。" }
+        if isSummarizing { return "后台正在生成每日摘要；手动编辑仍可用，自动草拟需等待或停止后台生成。" }
+        if isAdvising { return "后台正在生成推进建议；手动编辑仍可用，自动草拟需等待或停止后台生成。" }
+        if isReporting { return "后台正在生成回顾报告；手动编辑仍可用，自动草拟需等待或停止后台生成。" }
+        return nil
+    }
+    func cancelBackgroundModelWork() {
+        cancelGeneration(); cancelAdvice(); cancelReport()
+    }
     var archiveURL: URL { JournalArchive.directory(beside: workflowURL) }
     var canManageWorkflow: Bool { (workflowError == nil && archiveHistoryError == nil && canEdit) || isDemo }
     var todayCalls: [JournalCallRecord] {
@@ -123,7 +150,8 @@ public final class JournalStore: ObservableObject {
     init(directory: URL?, settings defaults: JournalSettings, planDesk: Bool = false,
          demo: Bool = false, summarizer: JournalSummarizing = JournalCLISummarizer(), requireLanguageSetup: Bool = false,
          advisor: JournalAgentAdvising = JournalCLIAgentAdvisor(),
-         reporter: JournalPeriodReporting = JournalPeriodReporter()) {
+         reporter: JournalPeriodReporting = JournalPeriodReporter(),
+         progressDrafter: JournalProgressDrafting = JournalCLIProgressDrafter()) {
         let base = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             // Keep the original storage identity so the rename never hides existing journals.
             .appendingPathComponent(planDesk ? "PlanDeskMac" : "ThreadJournal")
@@ -131,6 +159,7 @@ public final class JournalStore: ObservableObject {
         indexURL = base.appendingPathComponent(planDesk ? "codex-journal-index.json" : "index.json")
         agentHistoryURL = base.appendingPathComponent(planDesk ? "codex-journal-advice.json" : "journal-advice.json")
         workflowURL = base.appendingPathComponent(planDesk ? "codex-journal-workflow.json" : "journal-workflow.json")
+        threadProgressURL = base.appendingPathComponent(planDesk ? "codex-journal-progress.json" : "journal-progress.json")
         settings = defaults
         autoSummarize = false
         isDemo = demo
@@ -138,9 +167,10 @@ public final class JournalStore: ObservableObject {
         self.summarizer = summarizer
         self.advisor = advisor
         self.reporter = reporter
+        self.progressDrafter = progressDrafter
         reader = JournalReader(settings: defaults, indexURL: indexURL)
         if !demo {
-            do { try JournalBackupFile.recover(in: base, expectedFiles: [dataURL, agentHistoryURL, workflowURL]) }
+            do { try JournalBackupFile.recover(in: base, expectedFiles: [dataURL, agentHistoryURL, workflowURL, threadProgressURL]) }
             catch {
                 canSave = false; canSaveAgentHistory = false
                 workflowError = "检测到未完成的恢复，请重新打开以恢复原文件；不会继续写入或调用模型。"
@@ -168,9 +198,12 @@ public final class JournalStore: ObservableObject {
         if demo {
             loadDemo()
             loadDemoAdvice()
+            loadDemoProgress()
         } else {
             do { workflow = try JournalWorkflowFile.load(workflowURL) }
             catch { workflowError = "状态与调用记录读取失败；模型调用已停止，原文件已保留，可从备份恢复。" }
+            do { threadProgress = try JournalProgressFile.load(threadProgressURL) }
+            catch { progressStorageError = "任务树历史读取失败，原文件已保留；请从完整备份恢复。" }
             do {
                 agentHistory = try JournalAgentHistoryFile.load(agentHistoryURL)
                 agentResult = agentHistory.first
@@ -620,6 +653,70 @@ public final class JournalStore: ObservableObject {
         }
     }
     func cancelReport() { reportTask?.cancel() }
+    func progressInput(for key: String) -> JournalProgressInput {
+        JournalProgressInput.build(key: key, activities: activities, drafts: drafts,
+            existing: threadProgress.latest(key)?.plan)
+    }
+    @discardableResult
+    func saveThreadPlan(_ plan: JournalThreadPlan, for key: String, expected: UUID?,
+                        reason: JournalProgressReason = .edit, now: Date = Date()) throws -> JournalProgressSnapshot {
+        guard canManageProgress, !isLoading else { throw JournalError.message("任务树暂时不能保存，请检查存储或等待读取结束。") }
+        let snapshot = JournalProgressSnapshot(threadKey: key, createdAt: now, day: clock.key(now),
+            timeZoneID: settings.timeZoneID, reason: reason, plan: plan)
+        if isDemo {
+            guard threadProgress.latest(key)?.id == expected else { throw JournalError.message("任务树已由另一个窗口或实例修改，请重新加载后再保存。") }
+            var next = threadProgress; next.snapshots.append(snapshot)
+            try JournalProgressFile.validate(next); threadProgress = next
+        } else {
+            threadProgress = try JournalProgressFile.append(snapshot, expected: expected, to: threadProgressURL)
+        }
+        taskTreeError = nil
+        return snapshot
+    }
+    func reloadThreadPlans() throws {
+        guard !isDraftingTasks else { return }
+        if !isDemo { threadProgress = try JournalProgressFile.load(threadProgressURL) }
+        progressStorageError = nil; taskTreeError = nil
+    }
+    func draftThreadPlan(for key: String) {
+        guard !isInitializing, !isModelBusy, !isLoading, canManageProgress, !needsLanguageSetup, !needsOnboarding else { return }
+        let input = progressInput(for: key)
+        guard !input.records.isEmpty else { taskTreeError = "先保存至少一条每日摘要，或手动建立任务树。"; return }
+        let expected = threadProgress.latest(key)?.id
+        let generationSettings = settings
+        taskTreeError = nil
+        if isDemo {
+            do {
+                let result = JournalCLIProgressDrafter.demo(input, settings: settings)
+                var plan = try JournalCLIProgressDrafter.merge(result.response, input: input)
+                plan.engine = result.engine; plan.generatedAt = Date(); plan.languageCode = settings.summaryLanguage.rawValue
+                try saveThreadPlan(plan, for: key, expected: expected, reason: .model)
+            } catch { taskTreeError = error.localizedDescription }
+            return
+        }
+        isDraftingTasks = true
+        taskTreeTask = Task {
+            defer { isDraftingTasks = false; taskTreeTask = nil }
+            var callID: UUID?
+            do {
+                callID = try reserveCall(.taskTree, settings: generationSettings, itemCount: input.records.count)
+                let result = try await progressDrafter.draft(input, settings: generationSettings)
+                guard !Task.isCancelled else { finishCall(callID, outcome: .cancelled); return }
+                guard input.fingerprint == progressInput(for: key).fingerprint else {
+                    throw JournalError.message("生成期间摘要已变化，本次任务树未保存，请重新生成。")
+                }
+                var plan = try JournalCLIProgressDrafter.merge(result.response, input: input)
+                plan.engine = result.engine; plan.model = result.model
+                plan.generatedAt = Date(); plan.languageCode = generationSettings.summaryLanguage.rawValue
+                try saveThreadPlan(plan, for: key, expected: expected, reason: .model)
+                finishCall(callID, outcome: .succeeded)
+            } catch {
+                finishCall(callID, outcome: Task.isCancelled ? .cancelled : .failed)
+                if !Task.isCancelled { taskTreeError = error.localizedDescription }
+            }
+        }
+    }
+    func cancelTaskTree() { taskTreeTask?.cancel() }
     func retrySavingReport() {
         guard !isModelBusy, let result = reportResult, !workflow.reports.contains(where: { $0.id == result.id }) else { return }
         do { try mutateWorkflow { $0.reports.append(result) }; reportError = nil }
@@ -636,8 +733,9 @@ public final class JournalStore: ObservableObject {
             let journal = try JSONEncoder().encode(Saved(drafts: drafts, autoSummarize: autoSummarize, settings: settings,
                                                         draftTimeZones: draftTimeZones.isEmpty ? nil : draftTimeZones,
                                                         pendingTimeZoneActivities: migrationMetadata))
-            let backup = JournalBackupEnvelope(journal: journal, advice: advice, workflow: state,
-                                               archives: try JournalArchive.load(in: archiveURL))
+            let backup = JournalBackupEnvelope(version: 3, journal: journal, advice: advice, workflow: state,
+                                               archives: try JournalArchive.load(in: archiveURL),
+                                               progress: try JournalProgressFile.load(threadProgressURL))
             let bytes = try JSONEncoder().encode(backup)
             _ = try JournalBackupFile.decode(bytes)
             return bytes
@@ -666,6 +764,9 @@ public final class JournalStore: ObservableObject {
         let bytes = try JSONEncoder().encode(saved)
         let adviceBytes = try JournalAgentHistoryFile.encoded(backup.advice)
         let workflowBytes = try JSONEncoder().encode(restoredWorkflow)
+        // Legacy backups did not contain task trees. Preserve current trees on legacy restore.
+        let restoredProgress = try backup.progress ?? JournalProgressFile.load(threadProgressURL)
+        let progressBytes = try JSONEncoder().encode(restoredProgress)
         let existingArchives = try JournalArchive.load(in: archiveURL)
         var adviceIDs = Set(existingArchives.flatMap(\.advice).map(\.id) + backup.advice.map(\.id))
         var reportIDs = Set(existingArchives.flatMap(\.reports).map(\.id) + backup.workflow.reports.map(\.id))
@@ -677,11 +778,12 @@ public final class JournalStore: ObservableObject {
             value.calls = value.calls.filter { callIDs.insert($0.id).inserted }
             return value.advice.isEmpty && value.reports.isEmpty && value.calls.isEmpty ? nil : value
         }
-        let safety = try JournalBackupFile.replace([(dataURL, bytes), (agentHistoryURL, adviceBytes), (workflowURL, workflowBytes)],
+        let safety = try JournalBackupFile.replace([(dataURL, bytes), (agentHistoryURL, adviceBytes), (workflowURL, workflowBytes),
+                                                   (threadProgressURL, progressBytes)],
                                                    directory: dataURL.deletingLastPathComponent(), library: activities, archives: imports)
         let restoredState = try JournalWorkflowFile.load(workflowURL)
         isInitializing = true
-        drafts = source.drafts; autoSummarize = false; workflow = restoredState
+        drafts = source.drafts; autoSummarize = false; workflow = restoredState; threadProgress = restoredProgress
         draftTimeZones = restoredZones
         let allArchives = existingArchives + imports
         agentHistory = JournalArchive.advice(live: backup.advice, archives: allArchives); agentResult = agentHistory.first
@@ -692,6 +794,7 @@ public final class JournalStore: ObservableObject {
         activities = restoredState.library.filter { settings.includesProject($0.cwd) && settings.includesProvider($0.source) }
         expectedJournalBytes = bytes; legacyBytes = nil; canSave = true; canSaveAgentHistory = true
         workflowError = nil; agentHistoryError = nil; errorMessage = nil; reportError = nil
+        progressStorageError = nil; taskTreeError = nil
         reportResult = nil; lastAttempts = [:]; timeZoneMigrationSource = pendingMigration
         reader = JournalReader(settings: settings, indexURL: indexURL)
         isInitializing = false
@@ -753,5 +856,31 @@ public final class JournalStore: ObservableObject {
         }
         agentHistory = JournalAgentHistoryFile.sorted(agentHistory)
         agentResult = agentHistory.first
+    }
+    private func loadDemoProgress() {
+        let today = clock.calendar.startOfDay(for: Date())
+        for key in Set(activities.map(\.threadKey)).sorted() {
+            let input = progressInput(for: key)
+            guard !input.records.isEmpty else { continue }
+            let result = JournalCLIProgressDrafter.demo(input, settings: settings)
+            guard var plan = try? JournalCLIProgressDrafter.merge(result.response, input: input) else { continue }
+            plan.engine = "演示"; plan.languageCode = settings.summaryLanguage.rawValue
+            // Synthetic checkpoints are examples, never inferred confirmations of real work.
+            let yesterday = clock.calendar.date(byAdding: .day, value: -1, to: today)!.addingTimeInterval(18 * 3600)
+            let previousInput = JournalProgressInput.build(key: key, activities: activities.filter { $0.day <= clock.key(yesterday) },
+                drafts: drafts, existing: nil)
+            if !previousInput.records.isEmpty {
+                let previousResult = JournalCLIProgressDrafter.demo(previousInput, settings: settings)
+                if let previousPlan = try? JournalCLIProgressDrafter.merge(previousResult.response, input: previousInput) {
+                    _ = try? saveThreadPlan(previousPlan, for: key, expected: nil, reason: .model, now: yesterday)
+                }
+            }
+            if let index = plan.nodes.firstIndex(where: { $0.id == "foundation" }) {
+                plan.nodes[index].status = .completed; plan.nodes[index].confirmedAt = Date()
+                plan.nodes[index].userEdited = true
+            }
+            plan.scopeConfirmed = plan.kind == .fixed
+            _ = try? saveThreadPlan(plan, for: key, expected: threadProgress.latest(key)?.id, reason: .edit)
+        }
     }
 }

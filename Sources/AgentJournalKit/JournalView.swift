@@ -17,6 +17,7 @@ public struct JournalView: View {
     @State private var showingAgent = false
     @State private var showingManagement = false
     @State private var showingReports = false
+    @State private var progressActivity: JournalActivity?
     @State private var showingOnboarding: Bool
     @State private var showingDemo = false
     private let embeddedDemo: Bool
@@ -84,6 +85,7 @@ public struct JournalView: View {
         .sheet(isPresented: $showingShare) { JournalShareView(store: store, date: selectedDate) }
         .sheet(isPresented: $showingManagement) { JournalManagementView(store: store) }
         .sheet(isPresented: $showingReports) { JournalReportsView(store: store, date: selectedDate) }
+        .sheet(item: $progressActivity) { JournalThreadProgressView(store: store, activity: $0) }
         .sheet(isPresented: $showingAgent) {
             JournalAgentView(store: store, catalog: modelCatalog, date: selectedDate) { key in
                 search = ""; category = "全部"; sourceFilter = "all"; viewMode = "thread"
@@ -387,6 +389,9 @@ public struct JournalView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Text(activity.title).font(.system(size: 16, weight: .semibold)).lineLimit(2)
+                    if let plan = store.threadProgress.latest(activity.threadKey)?.plan {
+                        JournalThreadProgressSummary(plan: plan, language: store.settings.uiLanguage, compact: true)
+                    }
                     if draft.displaySummary.isEmpty {
                         Text(store.summarizingIDs.contains(activity.id) ? l("正在整理这一天的进展…") : l("%d 条对话 · 等待生成草稿", activity.messageCount))
                             .font(.subheadline).foregroundStyle(.secondary)
@@ -449,6 +454,13 @@ public struct JournalView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                     JournalOpenThreadButton(activity: activity, language: store.settings.uiLanguage, disabled: store.isDemo)
                         .font(.caption)
+                    Button { progressActivity = activity } label: {
+                        Label(l("任务树与每日进度"), systemImage: "list.bullet.indent")
+                    }.font(.caption).disabled(!store.canEdit)
+                    if let plan = store.threadProgress.latest(activity.threadKey)?.plan {
+                        JournalThreadProgressSummary(plan: plan, language: store.settings.uiLanguage, compact: true)
+                    }
+                    if let error = store.progressStorageError { Text(l.message(error)).font(.caption2).foregroundStyle(.orange) }
                     if !activity.cwd.isEmpty {
                         Text(URL(fileURLWithPath: activity.cwd).lastPathComponent)
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1).help(activity.cwd)

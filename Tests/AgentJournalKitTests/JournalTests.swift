@@ -540,6 +540,89 @@ final class JournalTests {
         XCTAssertTrue(invalid.items.isEmpty)
     }
 
+    func testShareThreadSelectionExcludesEveryDayAndUpdatesCounts() {
+        var first = sample(), next = sample(), cc = sample(), other = sample()
+        first.title = "私密线程标题"
+        next.day = "2026-10-01"; next.lastActivity = first.lastActivity.addingTimeInterval(86400)
+        next.title = "最新线程标题"
+        cc.provider = .claude; cc.title = "CC 同名 ID 的线程"
+        other.threadID = "other-id"; other.day = next.day; other.lastActivity = next.lastActivity
+        let activities = [first, next, cc, other]
+        var longDraft = JournalDraft()
+        longDraft.summary = String(repeating: "不应泄露的排除线程内容。", count: 180)
+        let drafts = [first.id: longDraft]
+        let all = JournalShareReport(activities: activities, drafts: drafts, start: first.day, end: next.day)
+        XCTAssertEqual(all.threadCount, 3)
+        XCTAssertEqual(all.threads.count, 3)
+        XCTAssertEqual(all.items.count, 4)
+        XCTAssertTrue(all.pageCount > 1)
+        let option = all.threads.first { $0.id == first.threadKey }!
+        XCTAssertEqual(option.recordCount, 2)
+        XCTAssertEqual(option.start, first.day); XCTAssertEqual(option.end, next.day)
+        XCTAssertEqual(option.title, next.title)
+
+        let exclusions: Set<String> = [first.threadKey]
+        let selected = JournalShareReport(activities: activities, drafts: drafts, start: first.day, end: next.day,
+            excludedThreadKeys: exclusions)
+        XCTAssertEqual(selected.threadCount, 2); XCTAssertEqual(selected.items.count, 2)
+        XCTAssertEqual(selected.activeDays, 2)
+        XCTAssertEqual(selected.codexCount, 1); XCTAssertEqual(selected.claudeCount, 1)
+        XCTAssertEqual(selected.pending.count, 2); XCTAssertEqual(selected.pageCount, 1)
+        XCTAssertFalse(selected.items.contains { $0.threadKey == first.threadKey })
+        XCTAssertFalse(selected.rows.contains { $0.summary.contains("不应泄露") })
+        XCTAssertEqual(Set(selected.rows.map(\.title)), Set(["线程 01", "线程 02"]))
+        // Provider-qualified keys cannot hide a CC thread sharing the same raw ID.
+        let onlyCC = JournalShareReport(activities: activities, drafts: drafts, start: first.day, end: next.day,
+            provider: "claude", excludedThreadKeys: exclusions)
+        XCTAssertEqual(onlyCC.items.map(\.id), [cc.id])
+        let narrower = JournalShareReport(activities: activities, drafts: drafts, start: next.day, end: next.day,
+            excludedThreadKeys: exclusions)
+        XCTAssertEqual(narrower.items.map(\.id), [other.id])
+        let none = JournalShareReport(activities: activities, drafts: drafts, start: first.day, end: next.day,
+            excludedThreadKeys: Set(all.threads.map(\.id)))
+        XCTAssertTrue(none.items.isEmpty); XCTAssertTrue(none.rows.isEmpty); XCTAssertTrue(none.pending.isEmpty)
+        XCTAssertEqual(none.threadCount, 0); XCTAssertEqual(none.activeDays, 0)
+        // Newly discovered threads are included without resetting earlier opt-outs.
+        var arrived = sample(); arrived.threadID = "new-thread"
+        let refreshed = JournalShareReport(activities: activities + [arrived], drafts: drafts,
+            start: first.day, end: next.day, excludedThreadKeys: exclusions)
+        XCTAssertTrue(refreshed.items.contains { $0.id == arrived.id })
+        var confirmedDraft = longDraft; confirmedDraft.confirmedAt = Date()
+        let confirmed = JournalShareReport(activities: activities, drafts: [first.id: confirmedDraft],
+            start: first.day, end: next.day, confirmedOnly: true, excludedThreadKeys: exclusions)
+        XCTAssertTrue(confirmed.items.isEmpty)
+    }
+
+    @MainActor
+    func testShareTitleChoiceAndRepositoryCredit() throws {
+        var excluded = sample(), kept = sample()
+        excluded.threadID = "excluded"; excluded.title = "不可分享的线程名字"
+        kept.title = "公开进展 /Users/demo/private/project"
+        var note = JournalDraft(); note.editedSummary = "整理完公开文档。"
+        let drafts = [kept.id: note]
+        let hidden = JournalShareReport(activities: [excluded, kept], drafts: drafts,
+            start: kept.day, end: kept.day, excludedThreadKeys: [excluded.threadKey], language: .english)
+        let named = JournalShareReport(activities: [excluded, kept], drafts: drafts,
+            start: kept.day, end: kept.day, showTitles: true, excludedThreadKeys: [excluded.threadKey], language: .english)
+        XCTAssertEqual(hidden.rows.map(\.title), ["Thread 01"])
+        XCTAssertEqual(named.rows.map(\.title), ["公开进展 [local path]"])
+        XCTAssertEqual(hidden.items.map(\.id), named.items.map(\.id))
+        XCTAssertFalse(named.rows.contains { $0.title.contains("不可分享") || $0.title.contains("/Users/") })
+        XCTAssertEqual(JournalShareReport.repositoryURL.absoluteString, "https://github.com/DavidSi123456/AgentJournal")
+        XCTAssertEqual(JournalText(.english)("来自 %@", JournalShareReport.repositoryURL.absoluteString),
+            "From https://github.com/DavidSi123456/AgentJournal")
+        let hiddenPNG = try JournalShareRenderer.png(hidden, page: 0)
+        let namedPNG = try JournalShareRenderer.png(named, page: 0)
+        XCTAssertEqual(Array(namedPNG.prefix(8)), [137, 80, 78, 71, 13, 10, 26, 10])
+        XCTAssertFalse(hiddenPNG == namedPNG)
+        for key in ["先选择要分享的线程，再预览图片", "1 · 选择内容", "2 · 预览图片", "关闭后使用线程编号，不显示原始名字。",
+                    "生成所选线程草稿", "返回选择", "预览图片", "选择要分享的线程", "全部选中", "全部取消",
+                    "所选日期没有符合条件的线程。", "至少选择一个线程，才能预览图片。"] {
+            XCTAssertFalse(JournalText(.english)(key) == key)
+        }
+        XCTAssertEqual(JournalText(.english)("%d / %d 个线程已选择", 2, 3), "2 / 3 threads selected")
+    }
+
     @MainActor
     func testSharePaginationAndPNGRendering() throws {
         var item = sample()

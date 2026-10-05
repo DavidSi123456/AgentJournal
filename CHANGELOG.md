@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.1 — task-tree generation and editing fixes (not yet tagged)
+
+- Keep manual task-tree editing and saving available during unrelated summary, advice and report jobs. Show the active job, a stop button and storage errors inside the tree view.
+- Use short, input-scoped summary references in the model prompt and output schema; locally restore canonical dated evidence and reject unknown references. Give specific validation errors without changing existing history.
+- Treat model-reported completion as an unconfirmed proposal, never confirmed progress. Proposals supported only by outdated notes remain in progress with a visible notice instead of discarding the whole tree. Preserve entire manually edited nodes, including historic evidence outside the bounded input.
+- Add synthetic regressions for busy-state editing, reference validation, conservative completion handling, manual-node protection and failed-generation history preservation. English and Chinese test runs each pass 87 checks; live-model tests remain opt-in.
+- Stop tracking local `Marketing` assets, ignore the directory and remove its README links. Local files are retained; existing Git history is not rewritten.
+
+## 0.6.0 — editable thread task trees and daily progress (not yet tagged)
+
+- Draft per-thread goals, stages and hierarchical tasks from bounded saved daily summaries using the selected summary engine, model and content language. Each real generation asks for consent and counts toward persisted request limits; it does not execute or message the source thread.
+- Show fixed-goal progress from human-confirmed leaf tasks only, after explicit scope confirmation. Research threads show editable stages without an overall percentage. Manual edits are protected from model updates.
+- Retain multiple immutable versions per day for model drafts, manual edits, checkpoints and historical restores in separate task-tree storage. Enforce hierarchy, evidence, file-size and optimistic revision checks; cancellations and stale results cannot overwrite changes.
+- Include task-tree history in backup format v3 and interrupted-restore recovery. Legacy backups preserve local trees, and demo trees remain synthetic and model-free.
+
+## 0.5.2 — configurable sharing previews (not yet tagged)
+
+- Choose which threads appear in a date-range sharing preview, with all included by default and selection applied across every day in the range.
+- Make thread titles optional and hidden by default, show selected-thread counts, and retain paginated PNG preview, copy, save and native sharing.
+- Add a repository credit and URL to progress cards, using the public AgentJournal repository address.
+
 ## 0.5.1 — built-in demo and guided onboarding (not yet tagged)
 
 - Add a first-launch, bilingual highlighted walkthrough of the real interface using synthetic-only demo data. Choose app/content languages and Codex / Claude Code / both; completing or skipping the tour is not model consent. Reopen the tour or interactive demo from the help menu.

@@ -12,11 +12,22 @@ struct JournalShareRow: Identifiable {
     var confirmed: Bool
 }
 
+struct JournalShareThread: Identifiable {
+    let id: String
+    let source: JournalProvider
+    let title: String
+    let start: String
+    let end: String
+    let recordCount: Int
+}
+
 struct JournalShareReport {
+    static let repositoryURL = URL(string: "https://github.com/DavidSi123456/AgentJournal")!
     let language: JournalInterfaceLanguage
     let start: String
     let end: String
     let items: [JournalActivity]
+    let threads: [JournalShareThread]
     let rows: [JournalShareRow]
     let pending: [JournalActivity]
     var threadCount: Int { Set(items.map(\.threadKey)).count }
@@ -32,6 +43,7 @@ struct JournalShareReport {
 
     init(activities: [JournalActivity], drafts: [String: JournalDraft], start: String, end: String,
          provider: String = "all", showTitles: Bool = false, confirmedOnly: Bool = false,
+         excludedThreadKeys: Set<String> = [],
          language: JournalInterfaceLanguage = .chinese) {
         self.language = language
         let l = JournalText(language)
@@ -39,7 +51,8 @@ struct JournalShareReport {
         items = activities.filter {
             $0.day >= start && $0.day <= end && (provider == "all" || $0.source.rawValue == provider)
                 && (!confirmedOnly || drafts[$0.id]?.isConfirmed == true)
-        }.sorted { $0.lastActivity > $1.lastActivity }
+                && !excludedThreadKeys.contains($0.threadKey)
+        }.sorted { $0.lastActivity == $1.lastActivity ? $0.id < $1.id : $0.lastActivity > $1.lastActivity }
         pending = items.filter {
             let draft = drafts[$0.id] ?? JournalDraft()
             return !draft.isConfirmed && draft.editedSummary == nil
@@ -47,9 +60,16 @@ struct JournalShareReport {
         }
         var orderedKeys: [String] = [], seen = Set<String>()
         for item in items where seen.insert(item.threadKey).inserted { orderedKeys.append(item.threadKey) }
+        let grouped = Dictionary(grouping: items, by: \.threadKey)
+        threads = orderedKeys.compactMap { key in
+            guard let records = grouped[key], let latest = records.first else { return nil }
+            let days = records.map(\.day).sorted()
+            return JournalShareThread(id: key, source: latest.source, title: latest.title,
+                start: days.first!, end: days.last!, recordCount: records.count)
+        }
         var output: [JournalShareRow] = []
         for (number, key) in orderedKeys.enumerated() {
-            for item in items.filter({ $0.threadKey == key }).sorted(by: { $0.day < $1.day }) {
+            for item in (grouped[key] ?? []).sorted(by: { $0.day < $1.day }) {
                 let draft = drafts[item.id] ?? JournalDraft()
                 let title = showTitles ? Self.clean(item.title, language: language) : l("线程 %@", String(format: "%02d", number + 1))
                 let text = draft.displaySummary.isEmpty
@@ -91,6 +111,7 @@ struct JournalShareReport {
 private struct JournalShareCard: View {
     let report: JournalShareReport
     let page: Int
+    var interactive = false
     private var l: JournalText { JournalText(report.language) }
     private let purple = Color(red: 0.48, green: 0.30, blue: 0.80)
     var body: some View {
@@ -137,6 +158,15 @@ private struct JournalShareCard: View {
                 Spacer()
                 Text("\(page + 1) / \(report.pageCount)").font(.system(size: 12)).foregroundStyle(.secondary)
             }
+            // ImageRenderer cannot rasterize Link controls. Export plain text;
+            // enable the clickable version only in the on-screen preview.
+            if interactive {
+                Link(l("来自 %@", JournalShareReport.repositoryURL.absoluteString), destination: JournalShareReport.repositoryURL)
+                    .font(.system(size: 12)).foregroundStyle(purple)
+            } else {
+                Text(l("来自 %@", JournalShareReport.repositoryURL.absoluteString))
+                    .font(.system(size: 12)).foregroundStyle(purple)
+            }
         }
         .padding(36).frame(width: 720, alignment: .leading)
         .background(LinearGradient(colors: [Color(red: 0.96, green: 0.94, blue: 1), .white],
@@ -173,6 +203,10 @@ struct JournalShareView: View {
     @State private var provider = "all"
     @State private var showTitles = false
     @State private var confirmedOnly = false
+    // Exclusions are scoped to this sheet. New threads default to included, and
+    // changing the date/source filter does not forget an earlier opt-out.
+    @State private var excludedThreadKeys = Set<String>()
+    @State private var previewing = false
     @State private var page = 0
     @State private var askingConsent = false
     @State private var initiatedGeneration = false
@@ -185,9 +219,14 @@ struct JournalShareView: View {
         _end = State(initialValue: date)
     }
     private var report: JournalShareReport {
+        makeReport(excluding: excludedThreadKeys)
+    }
+    private var availableReport: JournalShareReport { makeReport(excluding: []) }
+    private func makeReport(excluding keys: Set<String>) -> JournalShareReport {
         JournalShareReport(activities: store.activities, drafts: store.drafts,
             start: store.clock.key(start), end: store.clock.key(end), provider: provider,
-            showTitles: showTitles, confirmedOnly: confirmedOnly, language: store.settings.uiLanguage)
+            showTitles: showTitles, confirmedOnly: confirmedOnly, excludedThreadKeys: keys,
+            language: store.settings.uiLanguage)
     }
     private var currentPage: Int { min(page, report.pageCount - 1) }
 
@@ -196,26 +235,37 @@ struct JournalShareView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(l("分享这段时间的进展")).font(.title2.weight(.semibold))
-                    Text(l("按线程归并每日摘要 · 长内容自动分页，不丢记录")).font(.caption).foregroundStyle(.secondary)
+                    Text(l(previewing ? "按线程归并每日摘要 · 长内容自动分页，不丢记录" : "先选择要分享的线程，再预览图片"))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button(l("关闭")) { dismiss() }
             }
             HStack {
-                DatePicker(l("开始"), selection: $start, displayedComponents: .date)
-                DatePicker(l("结束"), selection: $end, displayedComponents: .date)
-                Picker(l("来源"), selection: $provider) {
-                    Text(l("全部")).tag("all"); Text("Codex").tag("codex"); Text("Claude Code").tag("claude")
-                }.frame(width: 170)
-            }.disabled(store.isSummarizing).environment(\.timeZone, store.clock.calendar.timeZone)
-            HStack {
-                Button(l("当天")) { start = end }
-                Button(l("最近 7 天")) { start = store.clock.calendar.date(byAdding: .day, value: -6, to: end)! }
-                Button(l("本月")) { start = store.clock.calendar.date(from: store.clock.calendar.dateComponents([.year, .month], from: end))! }
+                Label(l("1 · 选择内容"), systemImage: previewing ? "checkmark.circle.fill" : "1.circle.fill")
+                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                Label(l("2 · 预览图片"), systemImage: previewing ? "2.circle.fill" : "2.circle")
+                    .foregroundStyle(previewing ? Color.purple : .secondary)
                 Spacer()
-                Toggle(l("显示线程标题"), isOn: $showTitles)
-                Toggle(l("仅已确认"), isOn: $confirmedOnly)
-            }.font(.caption).disabled(store.isSummarizing)
+            }.font(.caption.weight(.medium))
+            if !previewing {
+                HStack {
+                    DatePicker(l("开始"), selection: $start, displayedComponents: .date)
+                    DatePicker(l("结束"), selection: $end, displayedComponents: .date)
+                    Picker(l("来源"), selection: $provider) {
+                        Text(l("全部")).tag("all"); Text("Codex").tag("codex"); Text("Claude Code").tag("claude")
+                    }.frame(width: 170)
+                }.disabled(store.isSummarizing).environment(\.timeZone, store.clock.calendar.timeZone)
+                HStack {
+                    Button(l("当天")) { start = end }
+                    Button(l("最近 7 天")) { start = store.clock.calendar.date(byAdding: .day, value: -6, to: end)! }
+                    Button(l("本月")) { start = store.clock.calendar.date(from: store.clock.calendar.dateComponents([.year, .month], from: end))! }
+                    Spacer()
+                    Toggle(l("显示线程标题"), isOn: $showTitles)
+                        .help(l("关闭后使用线程编号，不显示原始名字。"))
+                    Toggle(l("仅已确认"), isOn: $confirmedOnly)
+                }.font(.caption).disabled(store.isSummarizing)
+            }
             if report.start > report.end { Text(l("开始日期不能晚于结束日期。")).font(.caption).foregroundStyle(.orange) }
             HStack {
                 Text(l("%d 个线程 · %d 条每日记录 · %d 条可生成／更新", report.threadCount, report.items.count, report.pending.count))
@@ -226,32 +276,48 @@ struct JournalShareView: View {
                     Text(l.message(store.progressText)).font(.caption)
                     Button(l("停止生成")) { store.pauseAutomaticGeneration() }
                 } else {
-                    Button(l("生成期间草稿")) { askingConsent = true }
+                    Button(l("生成所选线程草稿")) { askingConsent = true }
                         .disabled(report.pending.isEmpty || store.isDemo || store.isLoading || store.isModelBusy || !store.canEdit)
                 }
             }
-            ScrollView {
-                JournalShareCard(report: report, page: currentPage)
-                    .overlay(RoundedRectangle(cornerRadius: 2).stroke(.purple.opacity(0.12)))
-            }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .underPageBackgroundColor))
+            if previewing {
+                ScrollView {
+                    JournalShareCard(report: report, page: currentPage, interactive: true)
+                        .overlay(RoundedRectangle(cornerRadius: 2).stroke(.purple.opacity(0.12)))
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Color(nsColor: .underPageBackgroundColor))
+            } else {
+                threadSelection
+            }
             if let error = store.errorMessage { Text(l.message(error)).font(.caption).foregroundStyle(.orange).lineLimit(2) }
             if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
             Text(l("仅分享整理后的文字，不带原始对话、路径字段或账号信息。仍请检查摘要中的个人信息；不会自动上传。"))
                 .font(.caption2).foregroundStyle(.secondary)
-            HStack {
-                Button { page = max(0, currentPage - 1) } label: { Image(systemName: "chevron.left") }.disabled(currentPage == 0)
-                Text(l("第 %d / %d 张", currentPage + 1, report.pageCount)).font(.caption.monospacedDigit())
-                Button { page = min(report.pageCount - 1, currentPage + 1) } label: { Image(systemName: "chevron.right") }
-                    .disabled(currentPage + 1 >= report.pageCount)
-                Spacer()
-                Button(l("复制图片")) { copyImage() }.disabled(report.items.isEmpty)
-                Button(l("保存 PNG")) { saveImage() }.disabled(report.items.isEmpty)
-                if report.pageCount > 1 { Button(l("保存全部")) { saveAllImages() } }
-                JournalNativeShareButton(title: l("分享图片"), enabled: !report.items.isEmpty) {
-                    let data = try JournalShareRenderer.png(report, page: currentPage)
-                    guard let image = NSImage(data: data) else { throw JournalError.message(l("图片无法读取")) }
-                    return image
-                }.frame(width: store.settings.uiLanguage == .english ? 110 : 82, height: 24)
+            if previewing {
+                HStack {
+                    Button(l("返回选择")) { previewing = false; message = nil }.disabled(store.isSummarizing)
+                    Button { page = max(0, currentPage - 1) } label: { Image(systemName: "chevron.left") }.disabled(currentPage == 0)
+                    Text(l("第 %d / %d 张", currentPage + 1, report.pageCount)).font(.caption.monospacedDigit())
+                    Button { page = min(report.pageCount - 1, currentPage + 1) } label: { Image(systemName: "chevron.right") }
+                        .disabled(currentPage + 1 >= report.pageCount)
+                    Spacer()
+                    Button(l("复制图片")) { copyImage() }.disabled(report.items.isEmpty)
+                    Button(l("保存 PNG")) { saveImage() }.disabled(report.items.isEmpty)
+                    if report.pageCount > 1 { Button(l("保存全部")) { saveAllImages() } }
+                    JournalNativeShareButton(title: l("分享图片"), enabled: !report.items.isEmpty) {
+                        let data = try JournalShareRenderer.png(report, page: currentPage)
+                        guard let image = NSImage(data: data) else { throw JournalError.message(l("图片无法读取")) }
+                        return image
+                    }.frame(width: store.settings.uiLanguage == .english ? 110 : 82, height: 24)
+                }
+            } else {
+                HStack {
+                    Text(l("%d / %d 个线程已选择", report.threadCount, availableReport.threadCount))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button(l("预览图片")) { page = 0; message = nil; previewing = true }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(report.items.isEmpty || store.isLoading || store.isSummarizing)
+                }
             }
         }.padding(24).frame(width: 920, height: 830).tint(.purple)
         .environment(\.locale, store.settings.uiLanguage.locale)
@@ -259,6 +325,8 @@ struct JournalShareView: View {
         .onChange(of: end) { _, _ in page = 0 }
         .onChange(of: provider) { _, _ in page = 0 }
         .onChange(of: confirmedOnly) { _, _ in page = 0 }
+        .onChange(of: excludedThreadKeys) { _, _ in page = 0 }
+        .onChange(of: showTitles) { _, _ in page = 0 }
         .onDisappear { if initiatedGeneration { store.cancelGeneration() } }
         .alert(l("生成所选日期的摘要？"), isPresented: $askingConsent) {
             Button(l("取消"), role: .cancel) { }
@@ -266,6 +334,48 @@ struct JournalShareView: View {
         } message: {
             Text(l("将通过 %@ 生成／更新 %d 条每日草稿。少量对话摘录会发送给该 CLI 的模型提供方，并消耗额度；你编辑或确认过的文字不会被覆盖。", store.settings.summaryEngine.label, report.pending.count))
         }
+    }
+    private var threadSelection: some View {
+        let options = availableReport
+        let visibleKeys = Set(options.threads.map(\.id))
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(l("选择要分享的线程")).font(.headline)
+                Spacer()
+                Button(l("全部选中")) { excludedThreadKeys.subtract(visibleKeys) }
+                Button(l("全部取消")) { excludedThreadKeys.formUnion(visibleKeys) }
+            }.disabled(store.isSummarizing || options.threads.isEmpty)
+            Text(l("默认全部包含；取消一个线程会排除它在所选期间的所有记录。这里只影响本次分享，不会删除日志。"))
+                .font(.caption).foregroundStyle(.secondary)
+            if options.threads.isEmpty {
+                Text(l("所选日期没有符合条件的线程。"))
+                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(options.threads) { thread in
+                            Toggle(isOn: Binding(get: { !excludedThreadKeys.contains(thread.id) }, set: { included in
+                                if included { excludedThreadKeys.remove(thread.id) }
+                                else { excludedThreadKeys.insert(thread.id) }
+                            })) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(thread.title).font(.body.weight(.medium)).lineLimit(2)
+                                    HStack {
+                                        Text(thread.source.label).foregroundStyle(thread.source == .codex ? Color.blue : Color.orange)
+                                        Text(l("%d 条每日记录", thread.recordCount))
+                                        Text(thread.start == thread.end ? thread.start : "\(thread.start) — \(thread.end)")
+                                    }.font(.caption).foregroundStyle(.secondary)
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                            }.toggleStyle(.checkbox).padding(14)
+                                .background(Color.purple.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }.padding(2)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            if report.items.isEmpty && !options.threads.isEmpty {
+                Text(l("至少选择一个线程，才能预览图片。")).font(.caption).foregroundStyle(.orange)
+            }
+        }.disabled(store.isSummarizing)
     }
     private func copyImage() {
         do {

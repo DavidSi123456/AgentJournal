@@ -384,7 +384,7 @@ extension JournalTests {
         XCTAssertEqual(Set(store.savedReports.map(\.id)), Set(reports.map(\.id)))
         let backupData = try store.backupData()
         let backup = try JournalBackupFile.decode(backupData)
-        XCTAssertEqual(backup.version, 2)
+        XCTAssertEqual(backup.version, 3)
         XCTAssertEqual(Set(JournalArchive.advice(live: backup.advice, archives: backup.archives ?? []).map(\.id)), Set(saved.map(\.id)))
         XCTAssertEqual(Set(JournalArchive.reports(live: backup.workflow.reports, archives: backup.archives ?? []).map(\.id)), Set(reports.map(\.id)))
         XCTAssertEqual(Set(backup.workflow.calls.map(\.id) + (backup.archives ?? []).flatMap(\.calls).map(\.id)), [old.id, recent.id])
@@ -412,7 +412,7 @@ extension JournalTests {
     @MainActor func testArchiveBackupValidationAndLegacyCompatibility() async throws {
         let store = JournalStore(directory: root, settings: settings)
         var legacy = try JournalBackupFile.decode(store.backupData())
-        legacy.version = 1; legacy.archives = nil
+        legacy.version = 1; legacy.archives = nil; legacy.progress = nil
         let legacyData = try JSONEncoder().encode(legacy)
         XCTAssertNoThrow(try store.restoreBackup(legacyData))
         let before = try Data(contentsOf: root.appendingPathComponent("journal.json"))

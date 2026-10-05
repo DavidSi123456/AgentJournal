@@ -1,6 +1,8 @@
 .build/
 .swiftpm/
 dist/
+# Local launch/promotional materials are not part of the published source.
+/Marketing/
 .DS_Store
 *.xcuserstate
 .env

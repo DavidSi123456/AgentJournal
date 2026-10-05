@@ -28,10 +28,10 @@ struct JournalAdviceFeedback: Codable, Identifiable {
     var createdAt = Date()
 }
 enum JournalCallKind: String, Codable {
-    case summary, automatic, advice, report
+    case summary, automatic, advice, report, taskTree
     var label: String {
         switch self { case .summary: return "手动摘要"; case .automatic: return "自动草稿"
-        case .advice: return "推进分析"; case .report: return "周报／月报" }
+        case .advice: return "推进分析"; case .report: return "周报／月报"; case .taskTree: return "任务树草拟" }
     }
 }
 enum JournalCallOutcome: String, Codable {
@@ -305,6 +305,8 @@ struct JournalBackupEnvelope: Codable {
     // Optional for v1 compatibility. Keep each archive bounded instead of
     // re-expanding live files past their 64 MiB safety limit on import.
     var archives: [JournalArchive.Envelope]? = nil
+    // Version 3 prevents older apps from silently dropping task trees on restore.
+    var progress: JournalProgressState? = nil
 }
 
 @MainActor
@@ -334,8 +336,11 @@ enum JournalBackupFile {
         try JournalFileAccess.withLock(directory: directory, allowRecovery: true) {
             guard let bytes = try JournalFileAccess.read(transaction, maximum: 16384) else { return }
             let manifest = try JSONDecoder().decode(RestoreManifest.self, from: bytes)
-            guard [1, 2].contains(manifest.version), Set(manifest.files) == Set(expectedFiles.map(\.lastPathComponent)),
-                  manifest.files.count == expectedFiles.count, Set(manifest.missing).isSubset(of: Set(manifest.files)) else {
+            let expectedNames = Set(expectedFiles.map(\.lastPathComponent))
+            let legacyNames = Set(expectedNames.filter { !$0.hasSuffix("progress.json") })
+            let actualNames = Set(manifest.files)
+            guard [1, 2].contains(manifest.version), actualNames == expectedNames || actualNames == legacyNames,
+                  actualNames.count == manifest.files.count, Set(manifest.missing).isSubset(of: actualNames) else {
                 throw JournalError.message("恢复事务格式无效，所有文件已保留。")
             }
             let imported = try importedArchiveURLs(manifest, directory: directory)
@@ -348,7 +353,7 @@ enum JournalBackupFile {
             }
             // Read and validate every original before rolling anything back.
             var originals: [(URL, Data?)] = []
-            for url in expectedFiles {
+            for url in expectedFiles where actualNames.contains(url.lastPathComponent) {
                 if manifest.missing.contains(url.lastPathComponent) { originals.append((url, nil)) }
                 else {
                     guard let data = try JournalFileAccess.read(safety.appendingPathComponent(url.lastPathComponent)) else {
@@ -371,13 +376,20 @@ enum JournalBackupFile {
     static func decode(_ data: Data) throws -> JournalBackupEnvelope {
         guard data.count <= 128 * 1024 * 1024 else { throw JournalError.message("备份文件过大。") }
         let value = try JSONDecoder().decode(JournalBackupEnvelope.self, from: data)
-        guard value.format == "AgentJournal Backup", [1, 2].contains(value.version),
+        guard value.format == "AgentJournal Backup", [1, 2, 3].contains(value.version),
               value.createdAt.timeIntervalSinceReferenceDate.isFinite,
+              (value.version == 3) == (value.progress != nil),
               value.journal.count <= JournalFileAccess.maximumBytes else { throw JournalError.message("备份格式或版本不兼容。") }
         let journal = try JSONDecoder().decode(JournalStore.Saved.self, from: value.journal)
         guard [1, 2].contains(journal.version) else { throw JournalError.message("备份日志版本不兼容。") }
         try JournalAgentHistoryFile.validate(value.advice)
         try JournalWorkflowFile.validate(value.workflow)
+        if let progress = value.progress {
+            guard value.version == 3, try JSONEncoder().encode(progress).count <= JournalFileAccess.maximumBytes else {
+                throw JournalError.message("备份格式或版本不兼容。")
+            }
+            try JournalProgressFile.validate(progress)
+        }
         if value.version == 1, !(value.archives ?? []).isEmpty { throw JournalError.message("备份格式或版本不兼容。") }
         for archive in value.archives ?? [] {
             try JournalArchive.validate(archive)
@@ -449,8 +461,10 @@ enum JournalBackupFile {
                 var metadata = Dictionary(uniqueKeysWithValues: state.library.map { ($0.id, $0) })
                 for var activity in library { activity.excerpts = []; metadata[activity.id] = activity }
                 state.library = metadata.values.sorted { $0.id < $1.id }
-                let envelope = JournalBackupEnvelope(journal: journal, advice: advice, workflow: state,
-                    archives: try JournalArchive.load(in: archiveFolder))
+                let progressBytes = originals.first { $0.0.lastPathComponent.hasSuffix("progress.json") }?.1
+                let progress = try progressBytes.map(JournalProgressFile.decode)
+                let envelope = JournalBackupEnvelope(version: progress == nil ? 2 : 3, journal: journal, advice: advice, workflow: state,
+                    archives: try JournalArchive.load(in: archiveFolder), progress: progress)
                 let data = try JSONEncoder().encode(envelope)
                 _ = try decode(data)
                 try JournalFileAccess.write(data, to: safety.appendingPathComponent("AgentJournal-PreRestore.json"))

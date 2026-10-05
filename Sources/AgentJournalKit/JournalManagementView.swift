@@ -39,7 +39,7 @@ struct JournalManagementView: View {
             .alert(l("确认恢复备份？"), isPresented: $confirmingRestore) {
                 Button(l("取消"), role: .cancel) { pendingBackup = nil }
                 Button(l("恢复"), role: .destructive) { restore() }
-            } message: { Text(restoreDescription + "\n\n" + l("将替换现有日志、建议历史和线程状态，并自动保留恢复前原文件。保留当前来源目录与设置，关闭自动草稿；不会调用模型。")) }
+            } message: { Text(restoreDescription + "\n\n" + l("将替换现有日志、建议历史、线程状态与任务树历史，并自动保留恢复前原文件。旧备份不含任务树时保留本机任务树。保留当前来源目录与设置，关闭自动草稿；不会调用模型。")) }
     }
     private var controls: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -94,7 +94,7 @@ struct JournalManagementView: View {
     }
     private var backup: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(l("备份包含人工记录、线程状态、建议与反馈、调用记录、周报／月报，以及线程标题和日期。不包含原始对话摘录、CLI 凭据文件或账号配置。"))
+            Text(l("备份包含人工记录、线程状态、任务树与每日历史、建议与反馈、调用记录、周报／月报，以及线程标题和日期。不包含原始对话摘录、CLI 凭据文件或账号配置。"))
             Text(l("备份未加密，可能含私人文字和本地路径。请保存到安全位置，不要提交到 GitHub。"))
                 .font(.callout).foregroundStyle(.orange)
             HStack(spacing: 18) {

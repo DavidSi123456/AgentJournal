@@ -15,6 +15,7 @@ See what you worked on each day and how each thread progressed across days. A pu
 - Thread view: find a thread and follow its daily progress on a timeline.
 - **Progress advisor**: choose the model and compare threads using saved progress and next steps only. See up to three recommended continuations/reviews, explicit waiting conditions, confidence, and dated evidence. No planner deadlines, importance, category weighting, automatic messages, or task execution.
 - **Daily advice history**: advice, evidence, actual model and generation time are saved locally, with multiple analyses per day. Browse dates and versions without calling a model. Green calendar dots mark days with saved advice; the advisor uses a green/teal accent distinct from Codex blue and Claude orange.
+- **Editable task trees (local preview)**: draft a per-thread hierarchy from saved notes, edit tasks and stages, confirm completed leaf tasks, and revisit daily versions. Fixed goals show task-count progress after scope confirmation; open-ended research shows stages instead of a guessed percentage.
 - **Advice feedback and thread states**: retain pending/handled/waiting/dismissed feedback; mark threads active, waiting, paused or completed. Suppress handled suggestions for unchanged progress and exclude paused/completed threads without deleting their history.
 - **Request controls**: set daily and automatic-generation limits, preview pending drafts, pause/cancel generation and inspect local CLI-job receipts. Counts are not token usage or provider billing.
 - **Backup and restore**: export a private JSON backup, validate imports, retain pre-restore safety copies and recover interrupted restoration. Backups are unencrypted and must not be published.
@@ -81,7 +82,7 @@ This is a macOS desktop Beta, not a web/mobile app or background service. Local 
 
 **Match discussion** asks the model to choose Chinese or English for each daily thread entry independently, prioritizing the language of human discussion rather than code or quoted text. Mixed discussions use the dominant user language; ambiguous cases fall back to the chosen app language. The model may occasionally infer incorrectly; choose a fixed language if consistency matters. App-language changes immediately update controls, date labels, category labels and share-card headings, but do not translate old notes or thread titles. Summary-language changes apply to future generation; use Regenerate model draft explicitly for an older record. Edited or confirmed text remains preserved.
 
-Click **Share image**, choose start/end dates (inclusive in the configured timezone), and optionally filter by source or confirmed notes. Generating drafts for that period fills missing/outdated daily summaries after consent; the image groups those summaries by thread. This card-sharing view does not create a separate period-level narrative; use **Weekly / monthly reports** for a synthesized review. Edited and confirmed notes are preserved. Long content is split into numbered images rather than truncated. Copy/share acts on the current page; **Save all** writes every page into a new subfolder.
+Click **Share image** to first choose start/end dates (inclusive in the configured timezone), sources and threads. All matching threads are selected by default; deselecting a thread excludes all its daily records in the range, including counts and draft generation. Thread titles are hidden by default; turn on **Show thread titles** to include names. Click **Preview image** before copying, saving or sharing; **Back to selection** preserves your choices, without deleting notes or changing thread states. Generating selected drafts fills missing/outdated daily summaries after consent. This card-sharing view does not create a separate period-level narrative; use **Weekly / monthly reports** for a synthesized review. Edited and confirmed notes are preserved. Long content is split into numbered images rather than truncated. Copy/share acts on the current page; **Save all** writes every page into a new subfolder. Each image includes the project's full GitHub URL; the preview link is clickable, but an exported PNG contains visible link text only.
 
 PNG rendering stays local and does not call a model or upload anything. Images exclude transcript excerpts, project path fields and account metadata; common local paths in summary text are redacted. Titles and human-written summaries can still contain sensitive information: review the preview before sharing. The native share menu sends an image only when you choose a destination.
 
@@ -99,13 +100,21 @@ Advice history may contain private titles and notes. Keep it out of Git and back
 
 #### Following through, request controls and backup
 
+Background summaries, advice and reports do not lock manual task-tree editing; the tree shows the active job and a stop button. Tree generation uses short, input-scoped summary references validated locally. Model completion proposals never count as confirmed work; proposals citing only outdated notes remain in progress with a visible notice. Invalid evidence or omitted tasks produce specific errors without changing existing history.
+
+Open **Task tree & daily progress** in the thread timeline. **Draft task tree / Update model draft** uses the current summary engine/model and content-language setting; each request asks for consent and counts toward the shared daily limit. It sends only this thread's title, current tree and up to 60 saved daily notes (the earliest 8 and latest 52 for long histories), not raw chat excerpts. Coverage and dated evidence are visible; missing/outdated notes and truncated text mean the inferred scope may be incomplete. Generation is manual, never a launch-time job for every thread.
+
+Model-reported completion remains **Completion to confirm**. Only human-confirmed leaf tasks contribute to the fixed-goal percentage; parent tasks are not double-counted, and this is not a time/workload estimate. Confirm the current goal scope before a percentage is shown; scope changes require renewed confirmation. Manually edited nodes are protected from subsequent model updates. Task confirmation never changes the separate thread state or confirms daily notes. Research threads have an editable stage and no overall percentage.
+
+Saving edits, generating a draft, recording today's snapshot or restoring an earlier version appends a dated version to separate local `journal-progress.json` storage. Multiple versions per day are retained; days without an action are not fabricated. Browsing history does not call a model. A history restore creates a new version rather than deleting later snapshots. Trees and evidence can contain private text and belong in backups, not Git. This first version does not yet automatically archive large task histories; the per-file safety limit rejects a write without deleting earlier versions.
+
 The thread timeline has an explicit **Thread state** selector. Active/waiting/paused/completed states are user decisions, independent of daily-note confirmation. Completed and paused threads stay in the journal but do not enter progress analysis. Advice cards accept pending/handled/waiting/dismissed feedback; every change is retained. Handled/dismissed advice is suppressed while that thread's bounded progress snapshot is unchanged. New progress can make it eligible again; completion/pausing only changes when you choose it. Waiting cannot become an execution recommendation. The advisor's model can be selected independently from daily summaries.
 
 Open **Data & requests** in the header for a read-only pending-draft preview, immediate pause/stop, optional historical auto-fill and daily limits. By default, browsing an old thread does not generate its entire history. Limits start at **20 local CLI generation jobs total / 5 automatic jobs** per calendar day in the app's time zone. One summary job handles up to four records. Failed/cancelled/started jobs count conservatively; the CLI may make multiple internal model requests. These are not token counts, billing figures, account quotas or limits on your other Codex/Claude usage. All summary/advice/report jobs reserve a persisted receipt before calling the CLI; a corrupted/newer receipt file blocks generation instead of resetting counts.
 
 **Backup & restore** exports a private, unencrypted JSON backup containing saved notes, advice/evidence, feedback, thread states, request logs, period reports and excerpt-free thread metadata. It does not package transcript excerpts, index caches or CLI authentication files. Notes/titles/local settings may themselves contain sensitive text and paths: keep backups out of GitHub. Import validates the complete backup before replacement, requires confirmation, retains exact pre-restore originals under the local `Restore Backups` folder, keeps your current source/model/language settings, and turns automatic drafts off. When the originals are readable, this safety folder also contains an importable `AgentJournal-PreRestore.json`; damaged originals are still retained exactly. Existing request receipts are retained so an old backup cannot reset today's count. An interrupted restore is rolled back on the next launch before writes or generation resume. Saved notes remain browsable from restored metadata if original transcripts are unavailable; regenerating a daily draft still needs its transcript excerpts.
 
-Backup format v2 includes archived advice, reviews and request receipts; v1 imports remain supported. Restore merges archives by record ID and retains existing local archived history, without re-expanding live files beyond their size limits. Repeated imports do not duplicate history. Archive imports participate in interrupted-restore rollback. Invalid/missing archives or backups larger than 128 MiB cause an explicit failure, never a silently incomplete backup. Backups also retain per-timezone note copies and pending date migrations.
+Backup format v3 includes task trees and their daily history, as well as archived advice, reviews and request receipts; v1/v2 imports remain supported and preserve local task trees when the legacy backup has none. Restore merges archives by record ID and retains existing local archived history, without re-expanding live files beyond their size limits. Repeated imports do not duplicate history. Archive imports participate in interrupted-restore rollback. Invalid/missing archives or backups larger than 128 MiB cause an explicit failure, never a silently incomplete backup. Backups also retain per-timezone note copies and pending date migrations.
 
 #### Weekly and monthly reviews
 
@@ -216,10 +225,6 @@ The guard prints filenames/rule names, never matched secret values. It is a heur
 
 The optional [Beta workflow](.github/workflows/release.yml) runs only when manually dispatched for an existing reviewed Beta tag. It creates an **unsigned draft prerelease**, never automatically publishes or replaces an existing release. Developer ID signing/notarization is an explicit local opt-in documented in [RELEASING.md](docs/RELEASING.md); Apple credentials are not configured in Actions. Read [CHANGELOG.md](CHANGELOG.md) for changes.
 
-### Launch materials
-
-The [launch copy](Marketing/2026-10/copy.txt), [Xiaohongshu cover](Marketing/2026-10/xiaohongshu-cover-v1.png), [feature page](Marketing/2026-10/xiaohongshu-features-v1.png), and [Moments poster](Marketing/2026-10/moments-v1.png) use synthetic illustrative UI, not private conversations or exact screenshots. Current Beta limitations are included; these files do not publish a post or change repository visibility. See the [maintainer guide](Marketing/2026-10/github-management.txt) for personal/private vs organization/public access and a proposed PR workflow, and the [image prompts](Marketing/2026-10/prompts.txt) for the built-in imagegen prompt set.
-
 ### References
 
 - [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode)
@@ -250,6 +255,7 @@ MIT. See [LICENSE](LICENSE). This implementation does not vendor code from other
 - **按线程查看**：搜索线程，在时间线上回顾它每天的进展。
 - **推进助手**：自选模型，只根据已保存的进展和下一步比较线程，给出最多三条推进或核对建议，以及等待条件、置信度和带日期的依据。不使用日程计划的 DDL、重要度或分类权重，不自动发消息或执行任务。
 - **每日建议历史**：本地保存建议、依据、实际模型和生成时间；同一天可以保留多个版本。浏览历史不调用模型，日历中的绿色圆点表示当天有建议记录。
+- **可编辑任务树（本地预览）**：按线程从已保存摘要草拟目标与子项，支持手动修改、完成确认和每日版本回看。固定目标确认范围后展示子项完成率；开放式研究展示阶段，不猜测百分比。
 - **建议反馈与线程状态**：保留尚未处理、已处理、等待、不采纳等反馈；线程可设为进行中、等待、搁置或完成。进展未变化时不重复推荐已处理的建议，搁置和完成的线程不参与推进分析，但历史不会删除。
 - **调用控制**：设置每日总上限和自动生成上限，预览待生成草稿，暂停或取消生成，查看本软件的 CLI 生成任务记录。这些计数不是 Token 用量或供应商账单。
 - **备份恢复**：导出私人 JSON 备份，导入前校验，恢复前保留安全副本，并处理被中断的恢复。备份未加密，不应公开上传。
@@ -316,7 +322,7 @@ open -n dist/AgentJournal.app --args --demo --demo-en --demo-setup
 
 **跟随讨论内容**会让模型独立判断每个每日线程记录应使用中文还是英文，优先看人的讨论语言，而不是代码或引用文本。混合讨论采用主要用户语言，无法判断时使用应用语言。模型可能判断错误，需要稳定输出时请选择固定语言。更改应用语言会即时更新控件、日期、分类和分享卡片标题，但不会翻译旧笔记或线程标题。摘要语言只影响之后的生成；旧记录可手动重新生成模型草稿，手动编辑和已确认内容仍会保留。
 
-点击**分享图片**，选择起止日期（按配置时区包含首尾两天），可筛选来源或仅使用已确认的记录。生成期间草稿会在确认后补齐缺失或过时的每日摘要，再按线程整理到图片中。这个卡片分享界面不生成独立的期间叙事；需要综合回顾时，请使用周报／月报。长内容会拆成编号图片，不直接截断；复制或分享作用于当前页，保存全部会把所有页写入新子文件夹。
+点击**分享图片**后，先选择起止日期（按配置时区包含首尾两天）、来源和需要包含的线程。符合条件的线程默认全选；取消一个线程会排除它在所选期间的所有每日记录，也不会计入图片统计或所选草稿生成。线程名字默认隐藏，可开启**显示线程标题**；点**预览图片**后再复制、保存或分享，也可**返回选择**保留并调整勾选，不会删除日志或改变线程状态。生成所选线程草稿会在确认后补齐缺失或过时的每日摘要。这个卡片分享界面不生成独立的期间叙事；需要综合回顾时，请使用周报／月报。长内容会拆成编号图片，不直接截断；复制或分享作用于当前页，保存全部会把所有页写入新子文件夹。每张图片底部包含项目的完整 GitHub 链接；预览里可点击，PNG 中保留可见链接文字。
 
 PNG 渲染在本地完成，不调用模型或自动上传。图片不包含对话原始片段、项目路径字段或账号元数据，摘要中常见的本地路径会做脱敏。但标题和人工笔记仍可能包含敏感信息，分享前请检查预览；只有选择目标后，系统分享菜单才会发送图片。
 
@@ -334,13 +340,21 @@ PNG 渲染在本地完成，不调用模型或自动上传。图片不包含对�
 
 #### 建议反馈、线程状态、调用控制与备份
 
+后台摘要、推进建议和回顾报告不会锁住手动任务树编辑，任务树会显示当前生成状态及停止入口。草拟任务树使用本次输入内的摘要短编号，并在本地校验归属。模型的完成提议不会直接计入完成进度；只引用过期摘要的完成提议保守保留为进行中并提示核实。错误引用或遗漏任务会给出具体错误，已有历史保持不变。
+
+在线程时间线打开**任务树与每日进度**。**自动草拟任务树／更新模型草稿**沿用当前摘要引擎、模型及内容语言设置，每次都征求确认并计入每日总调用上限。只发送这个线程的标题、现有任务树与最多 60 条已保存的每日摘要及下一步；长历史保留最早 8 条和最新 52 条，不发送原始聊天摘录。界面展示覆盖情况和带日期的依据；缺失、过时或截断的摘要意味着模型可能没有掌握完整目标。不会启动时自动给所有线程生成。
+
+模型认为完成的子项先标为**待确认完成**，人工确认并保存后才计入进度。固定目标只统计末级子项，不重复计算父项，也不代表时间或工作量；确认当前目标范围后才显示百分比，范围变化需要重新确认。人工修改的节点不会被后续模型更新覆盖。任务完成确认不改变独立的线程状态或每日笔记确认。开放式研究可编辑当前阶段，不显示总体百分比。
+
+保存修改、生成草稿、记录今日快照或恢复历史版本时，会将当天的新版本追加到独立的本地 `journal-progress.json`。同一天保留多个版本，没有操作的日期不会编造快照；浏览历史不调用模型，恢复历史也不会删除后来的记录。任务树与依据可能包含私人文字，只应进入备份，不应提交 Git。本版暂不自动归档较大的任务树历史，达到文件安全上限时拒绝写入，已有版本不删除。
+
 线程时间线提供明确的状态选择：进行中、等待、搁置、完成。这些是用户决定，与每日笔记确认独立。搁置和完成的线程仍保留日志，但不进入推进分析。建议卡片支持尚未处理、已处理、等待、不采纳，每次反馈变更都会保留。线程的有界进展快照不变时，已处理／不采纳的建议不会反复出现；新增进展后可重新参与判断，但完成／搁置状态只由用户主动修改。等待状态不能转换成执行推荐，推进助手的模型也可以与每日摘要分别选择。
 
 顶部的数据与调用管理提供只读待生成预览、立即暂停／停止、可选历史自动补齐，以及每日限额。默认不会因为浏览旧线程就生成全部历史。默认上限是应用时区每个自然日 **20 次本地 CLI 生成任务，其中自动任务最多 5 次**；一次摘要任务最多处理四条记录。失败、取消和已开始的任务也保守计入，CLI 内部可能发起多次模型请求。因此这些不是 Token 数、账单、账号额度，也不限制你在其他 Codex／Claude 界面的使用。摘要、推进建议和周报任务都会在调用 CLI 前持久化记录；记录文件损坏或版本更新时会停止生成，而不是重置计数。
 
 备份恢复导出未加密的私人 JSON，包含已保存笔记、建议及依据、反馈、线程状态、调用记录、期间回顾和不含对话片段的线程元数据；不打包原始对话片段、索引缓存或 CLI 认证文件。笔记、标题和本地设置本身仍可能含敏感文本或路径，请勿上传 GitHub。导入前校验整个备份并要求确认，恢复前的原文件完整保存在本地 `Restore Backups` 文件夹，保留当前来源目录、模型及语言设置，并关闭自动草稿。原文件可读时还会生成可以直接导入的 `AgentJournal-PreRestore.json`；损坏的原文件也原样保留。已有调用记录不会被清空，旧备份不能重置当天计数。恢复被中断时，下次启动先回滚，再允许写入或生成。原始对话不可用时仍可用恢复的元数据浏览笔记，但重新生成每日草稿仍需原对话片段。
 
-备份格式 v2 包含归档建议、回顾及调用记录，同时兼容导入 v1。恢复按记录 ID 合并归档并保留本机已有归档历史，不会将归档重新塞入活跃文件导致超限；重复导入不会重复显示历史。归档导入也参与中断恢复的回滚。归档损坏、缺失或备份超过 128 MiB 时明确报错，不会悄悄生成不完整的备份。备份同时保留各时区的笔记副本和待完成的日期迁移。
+备份格式 v3 包含任务树与每日历史，以及归档建议、回顾及调用记录，同时兼容导入 v1/v2；旧备份不含任务树时保留本机任务树。恢复按记录 ID 合并归档并保留本机已有归档历史，不会将归档重新塞入活跃文件导致超限；重复导入不会重复显示历史。归档导入也参与中断恢复的回滚。归档损坏、缺失或备份超过 128 MiB 时明确报错，不会悄悄生成不完整的备份。备份同时保留各时区的笔记副本和待完成的日期迁移。
 
 #### 周报与月报
 
@@ -450,10 +464,6 @@ ruby scripts/privacy_check.rb --staged
 检查器只打印文件名和规则名，不打印匹配的秘密值。它是启发式检查，不是完整安全审计，也不能证明截图或任意笔记可以公开。仓库中不应出现真实对话、日志或凭据。
 
 可选的 [Beta 工作流](.github/workflows/release.yml)只在手动触发并指定已有、审阅过的 Beta 标签时运行。它创建**未做 Developer ID 签名的草稿预发布**，不会自动公开发布或替换已有 Release。Developer ID 签名／公证需要明确选择本地执行，见 [RELEASING.md](docs/RELEASING.md)；Actions 中没有配置苹果凭据。版本变化见 [CHANGELOG.md](CHANGELOG.md)。
-
-### 宣传素材
-
-[发布文案](Marketing/2026-10/copy.txt)、[小红书封面](Marketing/2026-10/xiaohongshu-cover-v1.png)、[功能页](Marketing/2026-10/xiaohongshu-features-v1.png)和[朋友圈配图](Marketing/2026-10/moments-v1.png)使用合成界面的视觉示意，不是真实聊天或像素级截图，已说明当前 Beta 限制。生成文件不代表已发布帖子或修改仓库可见性。[项目管理指南](Marketing/2026-10/github-management.txt)说明个人／组织、private／public 的权限区别和建议 PR 流程；[图片提示词](Marketing/2026-10/prompts.txt)保留了内置 imagegen 的最终提示词集合。
 
 ### 参考资料
 

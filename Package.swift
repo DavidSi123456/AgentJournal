@@ -14,7 +14,8 @@ let package = Package(
             "JournalStore.swift", "JournalView.swift", "JournalModelCatalog.swift", "JournalShare.swift", "JournalLanguage.swift",
             "JournalAgent.swift", "JournalAgentView.swift", "JournalNavigation.swift",
             "JournalDiagnostics.swift", "JournalDiagnosticsView.swift",
-            "JournalWorkflow.swift", "JournalManagementView.swift", "JournalReports.swift", "JournalReportsView.swift", "JournalAppearance.swift", "JournalOnboarding.swift"
+            "JournalWorkflow.swift", "JournalManagementView.swift", "JournalReports.swift", "JournalReportsView.swift", "JournalAppearance.swift", "JournalOnboarding.swift",
+            "JournalThreadProgress.swift", "JournalThreadProgressView.swift"
         ]),
         .executableTarget(name: "AgentJournal", dependencies: ["AgentJournalKit"])
     ],
