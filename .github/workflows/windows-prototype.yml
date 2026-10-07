@@ -1,0 +1,37 @@
+name: Windows Swift prototype (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      desktop:
+        description: 'Also compile the experimental WinUI desktop interface'
+        required: true
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Same toolchain/environment setup used by SwiftCrossUI's Windows CI.
+      - uses: seanmiddleditch/gha-setup-vsdevenv@v5
+      - uses: compnerd/gha-setup-swift@v0.3.0
+        with:
+          branch: swift-6.1-release
+          tag: 6.1-RELEASE
+      - name: Synthetic core tests and desktop compile (no model calls)
+        run: |
+          if ('${{ inputs.desktop }}' -eq 'true') {
+            ./scripts/build_windows.ps1
+          } else {
+            ./scripts/build_windows.ps1 -CoreOnly
+          }
+      # Build logs prove compilation only. Do not publish a bare .exe as an
+      # installer: DLL/WinUI redistributable packaging is a separate milestone.

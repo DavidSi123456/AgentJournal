@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#endif
 
 protocol JournalSummarizing {
     func summarize(_ activities: [JournalActivity], settings: JournalSettings) async throws -> JournalSummaryBatch
@@ -31,6 +33,9 @@ final class JournalProcessControl: @unchecked Sendable {
 struct JournalCLISummarizer: JournalSummarizing {
     var executableOverride: URL?
     static func executable(for engine: JournalProvider) -> URL? {
+        #if os(Windows)
+        return JournalWindowsCLI.nativeExecutable(engine: engine)
+        #else
         let home = FileManager.default.homeDirectoryForCurrentUser
         let name = engine == .codex ? "codex" : "claude"
         // The native Claude installer self-updates here. Prefer it to an older
@@ -42,6 +47,7 @@ struct JournalCLISummarizer: JournalSummarizing {
         paths += ["/opt/homebrew/bin/\(name)", "/usr/local/bin/\(name)"]
         if engine == .codex { paths.append("/Applications/Codex.app/Contents/Resources/codex") }
         return paths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }).map(URL.init(fileURLWithPath:))
+        #endif
     }
 
     func summarize(_ activities: [JournalActivity], settings: JournalSettings) async throws -> JournalSummaryBatch {
@@ -53,15 +59,22 @@ struct JournalCLISummarizer: JournalSummarizing {
     }
 
     func request(prompt: String, schema: String, settings: JournalSettings) async throws -> JournalCLIOutput {
+        #if os(Windows)
+        let launch = try JournalWindowsCLI.resolve(engine: settings.summaryEngine, override: executableOverride)
+        let executable = launch.executable
+        let prefix = launch.arguments
+        #else
         guard let executable = executableOverride ?? Self.executable(for: settings.summaryEngine) else {
             throw JournalError.message(JournalText(settings.uiLanguage)("未找到 %@ CLI。请安装并登录，或在设置中切换摘要引擎。", settings.summaryEngine.label))
         }
+        let prefix: [String] = []
+        #endif
         let control = JournalProcessControl()
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
-                        let result = try Self.run(executable: executable, prompt: prompt, schema: schema, settings: settings, control: control)
+                        let result = try Self.run(executable: executable, prefix: prefix, prompt: prompt, schema: schema, settings: settings, control: control)
                         continuation.resume(returning: result)
                     } catch { continuation.resume(throwing: error) }
                 }
@@ -131,7 +144,9 @@ struct JournalCLISummarizer: JournalSummarizing {
 
     static func environment(settings: JournalSettings, inherited: [String: String], home: URL) -> [String: String] {
         var result = inherited
+        #if !os(Windows)
         result["PATH"] = "\(home.appendingPathComponent(".local/bin").path):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        #endif
         result["CODEX_HOME"] = settings.codexHome
         // Setting CLAUDE_CONFIG_DIR, even to the default path, selects a different
         // keychain authentication namespace. Preserve the usual subscription login.
@@ -142,25 +157,27 @@ struct JournalCLISummarizer: JournalSummarizing {
         return result
     }
 
-    private static func run(executable: URL, prompt: String, schema: String, settings: JournalSettings,
+    private static func run(executable: URL, prefix: [String], prompt: String, schema: String, settings: JournalSettings,
                             control: JournalProcessControl) throws -> JournalCLIOutput {
         let manager = FileManager.default
         let directory = manager.temporaryDirectory.appendingPathComponent("agentjournal-summary-\(UUID().uuidString)")
-        try manager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: JournalPlatform.attributes(0o700))
         defer { try? manager.removeItem(at: directory) }
         let schemaURL = directory.appendingPathComponent("schema.json")
         let outputURL = directory.appendingPathComponent("summary.json")
         let logURL = directory.appendingPathComponent("process.log")
         try Data(schema.utf8).write(to: schemaURL)
-        manager.createFile(atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        manager.createFile(atPath: logURL.path, contents: nil, attributes: JournalPlatform.attributes(0o600))
         let log = try FileHandle(forWritingTo: logURL)
         defer { try? log.close() }
         let input = Pipe()
+        #if canImport(Darwin)
         _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        #endif
         let process = Process()
         process.executableURL = executable
         process.currentDirectoryURL = directory
-        process.arguments = arguments(engine: settings.summaryEngine, model: settings.model.trimmingCharacters(in: .whitespacesAndNewlines),
+        process.arguments = prefix + arguments(engine: settings.summaryEngine, model: settings.model.trimmingCharacters(in: .whitespacesAndNewlines),
                                       schemaPath: schemaURL.path, outputPath: outputURL.path, schemaContent: schema)
         process.environment = environment(settings: settings, inherited: ProcessInfo.processInfo.environment,
                                           home: manager.homeDirectoryForCurrentUser)

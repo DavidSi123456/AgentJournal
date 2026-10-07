@@ -60,14 +60,7 @@ public final class JournalStore: ObservableObject {
     public var waitingForLanguageSelection: Bool { needsLanguageSetup || needsOnboarding }
     public func openSettings() { settingsRequest += 1 }
 
-    struct Saved: Codable {
-        var version = 2
-        var drafts: [String: JournalDraft]
-        var autoSummarize: Bool
-        var settings: JournalSettings?
-        var draftTimeZones: [String: [String: JournalDraft]]? = nil
-        var pendingTimeZoneActivities: [JournalActivity]? = nil
-    }
+    typealias Saved = JournalSaved
     private var reader: JournalReader
     private let summarizer: JournalSummarizing
     private let advisor: JournalAgentAdvising

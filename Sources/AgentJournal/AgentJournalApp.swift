@@ -5,7 +5,8 @@ import AgentJournalKit
 struct AgentJournalApp: App {
     @StateObject private var store = JournalStore(demo: CommandLine.arguments.contains("--demo")
         || Bundle.main.object(forInfoDictionaryKey: "AgentJournalDemoOnly") as? Bool == true,
-        demoLanguage: CommandLine.arguments.contains("--demo-en") ? "en" : nil,
+        demoLanguage: CommandLine.arguments.contains("--demo-en") ? "en"
+            : Bundle.main.object(forInfoDictionaryKey: "AgentJournalDemoLanguage") as? String,
         demoLanguageSetup: CommandLine.arguments.contains("--demo-setup"))
     var body: some Scene {
         WindowGroup("AgentJournal") {

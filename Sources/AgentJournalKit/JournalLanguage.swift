@@ -95,6 +95,7 @@ struct JournalText {
         "固定目标": "Fixed goal", "开放式研究": "Open-ended research", "未开始": "Not started",
         "待确认完成": "Completion to confirm", "受阻": "Blocked", "已确认完成": "Confirmed complete",
         "模型草拟": "Model draft", "人工修改": "Manual edit", "记录今日快照": "Save today's snapshot",
+        "保存修改": "Save changes",
         "恢复历史版本": "Historical version restored", "任务树草拟": "Task tree draft",
         "任务树格式无效，已有记录未修改。": "Invalid task tree. Existing records were not changed.",
         "任务树不能循环嵌套，最多支持五层。": "Task trees cannot contain cycles and support up to five levels.",

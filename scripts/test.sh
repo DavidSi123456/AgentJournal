@@ -14,6 +14,9 @@ mkdir -p "$PROJECT_DIR/.build"
 swiftc -swift-version 5 -parse-as-library -o "$PROJECT_DIR/.build/JournalChecks" \
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalLanguage.swift" \
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalModels.swift" \
+    "$PROJECT_DIR/Sources/AgentJournalKit/JournalPlatform.swift" \
+    "$PROJECT_DIR/Sources/AgentJournalKit/JournalPortableHash.swift" \
+    "$PROJECT_DIR/Sources/AgentJournalKit/JournalWindowsCLI.swift" \
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalReader.swift" \
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalSummarizer.swift" \
     "$PROJECT_DIR/Sources/AgentJournalKit/JournalModelCatalog.swift" \

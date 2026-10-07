@@ -1,5 +1,4 @@
 import Foundation
-import Darwin
 
 enum JournalThreadStatus: String, Codable, CaseIterable {
     case active, waiting, paused, completed
@@ -94,23 +93,20 @@ enum JournalFileAccess {
         guard (try? manager.destinationOfSymbolicLink(atPath: directory.path)) == nil else {
             throw JournalError.message("存储目录不能使用符号链接。")
         }
-        try manager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: JournalPlatform.attributes(0o700))
         let lockURL = directory.appendingPathComponent(".agentjournal.lock")
-        let descriptor = open(lockURL.path, O_CREAT | O_RDWR | O_NOFOLLOW, S_IRUSR | S_IWUSR)
-        guard descriptor >= 0 else { throw JournalError.message("无法锁定日志存储，请检查目录权限。") }
-        defer { close(descriptor) }
-        guard flock(descriptor, LOCK_EX) == 0 else { throw JournalError.message("无法锁定日志存储，请重试。") }
-        defer { flock(descriptor, LOCK_UN) }
-        if !allowRecovery, try read(directory.appendingPathComponent(".restore-transaction.json"), maximum: 16384) != nil {
-            throw JournalError.message("检测到未完成的恢复，请重新打开以恢复原文件；不会继续写入或调用模型。")
+        return try JournalPlatform.withLock(lockURL) {
+            if !allowRecovery, try read(directory.appendingPathComponent(".restore-transaction.json"), maximum: 16384) != nil {
+                throw JournalError.message("检测到未完成的恢复，请重新打开以恢复原文件；不会继续写入或调用模型。")
+            }
+            return try operation()
         }
-        return try operation()
     }
     static func write(_ data: Data, to url: URL) throws {
         guard data.count <= maximumBytes else { throw JournalError.message("存储文件过大，请先备份。") }
         _ = try read(url)
         try data.write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try JournalPlatform.restrict(url)
     }
     static func saveJournal(_ data: Data, to url: URL, expected: Data?) throws {
         try withLock(directory: url.deletingLastPathComponent()) {
@@ -185,14 +181,14 @@ enum JournalArchive {
         guard (try? manager.destinationOfSymbolicLink(atPath: folder.path)) == nil else {
             throw JournalError.message("归档目录不能使用符号链接，原文件已保留。")
         }
-        try manager.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try manager.createDirectory(at: folder, withIntermediateDirectories: true, attributes: JournalPlatform.attributes(0o700))
         let stem = url.deletingPathExtension().lastPathComponent
         let stamp = JournalClock(timeZoneID: "UTC").label(envelope.createdAt, "yyyyMMdd-HHmmss")
         let file = folder.appendingPathComponent("\(stem)-archive-\(stamp)-\(UUID().uuidString.prefix(8)).json")
         let data = try JSONEncoder().encode(envelope)
         guard data.count <= JournalFileAccess.maximumBytes else { throw JournalError.message("存储文件过大，请先备份。") }
         try data.write(to: file, options: .withoutOverwriting)
-        try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        try JournalPlatform.restrict(file)
     }
     /// Counts distinct archived items; an interrupted rotation may archive an item twice.
     static func summary(in folder: URL) -> Summary {
@@ -380,7 +376,7 @@ enum JournalBackupFile {
               value.createdAt.timeIntervalSinceReferenceDate.isFinite,
               (value.version == 3) == (value.progress != nil),
               value.journal.count <= JournalFileAccess.maximumBytes else { throw JournalError.message("备份格式或版本不兼容。") }
-        let journal = try JSONDecoder().decode(JournalStore.Saved.self, from: value.journal)
+        let journal = try JSONDecoder().decode(JournalSaved.self, from: value.journal)
         guard [1, 2].contains(journal.version) else { throw JournalError.message("备份日志版本不兼容。") }
         try JournalAgentHistoryFile.validate(value.advice)
         try JournalWorkflowFile.validate(value.workflow)
@@ -421,7 +417,7 @@ enum JournalBackupFile {
             let archiveManifest = RestoreManifest(version: 2, backupID: backupID, files: [], missing: [], newArchives: archiveNames)
             let imported = try importedArchiveURLs(archiveManifest, directory: directory)
             if !imported.isEmpty {
-                try manager.createDirectory(at: archiveFolder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                try manager.createDirectory(at: archiveFolder, withIntermediateDirectories: true, attributes: JournalPlatform.attributes(0o700))
                 for url in imported {
                     guard try JournalFileAccess.read(url) == nil else { throw JournalError.message("恢复目标已存在，原文件已保留。") }
                 }
@@ -429,7 +425,7 @@ enum JournalBackupFile {
             let parent = directory.appendingPathComponent("Restore Backups")
             guard (try? manager.destinationOfSymbolicLink(atPath: parent.path)) == nil else { throw JournalError.message("恢复备份目录不能使用符号链接。") }
             let safety = parent.appendingPathComponent(backupID.uuidString)
-            try manager.createDirectory(at: safety, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try manager.createDirectory(at: safety, withIntermediateDirectories: true, attributes: JournalPlatform.attributes(0o700))
             var originals: [(URL, Data?)] = []
             var prepared = files
             for (index, pair) in files.enumerated() {
@@ -453,7 +449,7 @@ enum JournalBackupFile {
             // pre-restore backup. Corrupt originals are still preserved exactly.
             do {
                 let journal = try originals.first { $0.0.lastPathComponent == "journal.json" || $0.0.lastPathComponent == "codex-journal.json" }?.1
-                    ?? JSONEncoder().encode(JournalStore.Saved(drafts: [:], autoSummarize: false, settings: nil))
+                    ?? JSONEncoder().encode(JournalSaved(drafts: [:], autoSummarize: false, settings: nil))
                 let adviceBytes = originals.first { $0.0.lastPathComponent.hasSuffix("advice.json") }?.1
                 let advice = try adviceBytes.map(JournalAgentHistoryFile.decode) ?? []
                 let workflowBytes = originals.first { $0.0.lastPathComponent.hasSuffix("workflow.json") }?.1

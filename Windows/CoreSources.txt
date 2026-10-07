@@ -1,0 +1,13 @@
+JournalModels.swift
+JournalReader.swift
+JournalLanguage.swift
+JournalSummarizer.swift
+JournalNavigation.swift
+JournalWorkflow.swift
+JournalAgent.swift
+JournalReports.swift
+JournalThreadProgress.swift
+JournalPlatform.swift
+JournalPortableHash.swift
+JournalWindowsCLI.swift
+PortableJournal.swift

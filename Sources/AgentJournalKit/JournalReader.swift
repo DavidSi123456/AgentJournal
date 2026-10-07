@@ -191,7 +191,7 @@ actor JournalReader {
         if indexDirty {
             do {
                 try manager.createDirectory(at: indexURL.deletingLastPathComponent(), withIntermediateDirectories: true,
-                                            attributes: [.posixPermissions: 0o700])
+                                            attributes: JournalPlatform.attributes(0o700))
                 try JournalFileAccess.withLock(directory: indexURL.deletingLastPathComponent()) {
                     try JournalFileAccess.write(JSONEncoder().encode(index), to: indexURL)
                 }
@@ -238,7 +238,7 @@ actor JournalReader {
         while true {
             // Foundation's file/JSON bridges can leave autoreleased objects alive
             // for the whole actor call. Drain per chunk, not after a multi-GB scan.
-            let more = try autoreleasepool { () throws -> Bool in
+            let more = try JournalPlatform.drainPool { () throws -> Bool in
                 guard let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty else { return false }
                 pending.append(chunk)
                 while let newline = pending.firstIndex(of: 10) {

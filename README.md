@@ -8,6 +8,22 @@ Daily progress, organized by thread. A native macOS journal for **Codex + Claude
 
 See what you worked on each day and how each thread progressed across days. A purple interface brings both tools together: Codex threads are blue, Claude Code threads are orange, and the progress advisor uses green/teal. Choose Chinese or English for the app, independently of the language used for generated content.
 
+### See it in action
+
+Three short walkthroughs from the **English macOS demo**. All conversations and notes are synthetic; no model requests are made, and demo edits stay in memory. These recordings do not verify the experimental Windows prototype.
+
+#### 1. Review your day and confirm a note
+
+![Select a calendar day, filter Codex threads, edit a daily note and save it as confirmed.](docs/media/agentjournal-daily-en.gif)
+
+#### 2. Follow a thread and revisit its progress
+
+![Browse a thread across days, confirm completed tasks, save a task-tree version and revisit an earlier snapshot.](docs/media/agentjournal-thread-en.gif)
+
+#### 3. Export a shareable progress image
+
+![Choose the threads and titles to include, preview paginated progress cards and successfully save a PNG.](docs/media/agentjournal-share-en.gif)
+
 ### Features
 
 - Day view: select a calendar day to see each thread's activity and editable summary draft.
@@ -39,6 +55,14 @@ See what you worked on each day and how each thread progressed across days. A pu
 - Local Codex and/or Claude Code history. You do **not** need both tools to browse.
 - For model summaries: an installed, authenticated Codex CLI or Claude Code CLI. Model access and usage are determined by that CLI account/provider.
 - Tested locally with Codex CLI 0.147.0 and Claude Code 2.1.251. Transcript formats and CLI flags can change; other versions are not guaranteed.
+
+### Experimental Windows prototype
+
+A first Swift Windows developer prototype is available in the source tree: daily/thread
+views, synthetic demo, editable notes and consent-gated CLI summaries. It shares the
+macOS reader/validation logic, but is **not yet a Windows-verified standalone installer**
+and does not include the full macOS feature set. See [Windows setup and limitations](Windows/README.md).
+The existing macOS app remains the default build; no Windows UI dependencies are required for it.
 
 ### Build and run
 
@@ -248,6 +272,8 @@ MIT. See [LICENSE](LICENSE). This implementation does not vendor code from other
 
 整体采用紫色界面；Codex 线程为蓝色，Claude Code 线程为橙色，推进助手为青绿色。应用界面可以选择中文或英文，生成内容的语言可以独立设置。
 
+[查看上方三段英文操作演示](#see-it-in-action)：日历与笔记确认、线程进度与每日历史、分享图片导出。录制使用 macOS 演示模式和虚构数据，不调用模型，也不代表 Windows 版本已通过验证。
+
 ### 功能
 
 - **按天查看**：点击日历中的日期，查看当天各线程的活动和可编辑摘要草稿。
@@ -279,6 +305,13 @@ MIT. See [LICENSE](LICENSE). This implementation does not vendor code from other
 - 需要本地 Codex 或 Claude Code 历史；不必同时安装两种工具才能浏览。
 - 生成模型摘要需要安装并登录 Codex CLI 或 Claude Code CLI，模型权限和用量由对应 CLI 账号及供应商决定。
 - 本地验证使用 Codex CLI 0.147.0 和 Claude Code 2.1.251。记录格式和 CLI 参数可能变化，不保证其他版本兼容。
+
+### 实验性 Windows 原型
+
+源代码中新增了第一版 Swift Windows 开发原型：按天／线程浏览、内置演示、可编辑笔记、
+确认后调用 CLI 摘要。复用 Mac 版解析与校验逻辑，但**尚不是经过 Windows 验证的独立安装包**，
+也没有覆盖 Mac 版全部功能。详见 [Windows 构建与限制](Windows/README.md)。
+Mac 版仍是默认构建，不需要下载 Windows 界面依赖。
 
 ### 构建和运行
 

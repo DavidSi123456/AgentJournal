@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(CryptoKit)
 import CryptoKit
+#endif
 
 enum JournalProvider: String, Codable, CaseIterable, Identifiable {
     case codex, claude
@@ -25,7 +27,11 @@ struct JournalClock: Equatable {
         return bytes.enumerated().allSatisfy { index, byte in index == 4 || index == 7 ? byte == 45 : (48...57).contains(byte) }
     }
     static func hash(_ text: String) -> String {
+        #if canImport(CryptoKit) && !AGENTJOURNAL_PORTABLE_HASH
         SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+        #else
+        JournalPortableHash.hash(text)
+        #endif
     }
 
     // Day keys are computed for every record on every refresh and render. Calendars and
@@ -128,6 +134,16 @@ struct JournalDraft: Codable, Equatable {
         if let summaryModel, !summaryModel.isEmpty { return summaryModel }
         return summaryEngine.map { "\($0) · 模型未报告" } ?? "旧草稿 · 模型未记录"
     }
+}
+
+// Shared disk format, independent of the macOS ObservableObject store.
+struct JournalSaved: Codable {
+    var version = 2
+    var drafts: [String: JournalDraft]
+    var autoSummarize: Bool
+    var settings: JournalSettings?
+    var draftTimeZones: [String: [String: JournalDraft]]? = nil
+    var pendingTimeZoneActivities: [JournalActivity]? = nil
 }
 
 struct JournalSummaryRow: Codable {

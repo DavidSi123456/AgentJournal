@@ -24,6 +24,9 @@ jobs:
           zsh -n scripts/build_dmg.sh
           zsh -n scripts/verify_dmg.sh
           zsh -n scripts/test.sh
+          zsh -n scripts/test_portable.sh
+          zsh -n scripts/stage_portable.sh
+          zsh -n scripts/preview_windows.sh
       - name: Signing configuration must fail closed
         run: |
           if zsh scripts/build_app.sh --sign; then exit 1; fi
@@ -32,6 +35,8 @@ jobs:
           if zsh scripts/build_dmg.sh --notarize; then exit 1; fi
       - name: Swift tests in English and Chinese (synthetic data, no model calls)
         run: zsh scripts/test.sh --all-locales
+      - name: Portable Swift core tests (synthetic data, no model calls)
+        run: zsh scripts/test_portable.sh
       - name: Build ZIP and read-only DMG test installers
         run: zsh scripts/build_dmg.sh
       - uses: actions/upload-artifact@v7

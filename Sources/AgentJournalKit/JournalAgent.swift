@@ -156,7 +156,7 @@ enum JournalAgentHistoryFile {
             throw JournalError.message("推进建议历史无法安全保存，原文件已保留。")
         }
         try manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
-                                    attributes: [.posixPermissions: 0o700])
+                                    attributes: JournalPlatform.attributes(0o700))
         if bytes.count > archiveLimit && merged.count > 1 {
             // `merged` is newest first. Archive (never delete) the oldest snapshots first.
             let keep = min(merged.count - 1, JournalArchive.keepCount(merged.count, bytes: bytes.count, limit: archiveLimit))
@@ -168,7 +168,7 @@ enum JournalAgentHistoryFile {
             throw JournalError.message("推进建议历史文件过大，请先备份；已有建议未删除。")
         }
         try bytes.write(to: url, options: .atomic)
-        try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try JournalPlatform.restrict(url)
         return merged
     }
 

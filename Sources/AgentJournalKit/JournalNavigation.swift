@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(AppKit)
 import AppKit
+#endif
 
 /// No resume/import calls: returning to a desktop session must keep its identity.
 enum JournalNavigation {
@@ -21,6 +23,7 @@ enum JournalNavigation {
         let resume = "\(activity.source == .codex ? "codex resume" : "claude --resume") \(quote(activity.threadID))"
         return activity.cwd.isEmpty ? resume : "cd \(quote(activity.cwd)) && \(resume)"
     }
+    #if canImport(AppKit)
     static func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
@@ -45,6 +48,7 @@ enum JournalNavigation {
         NSWorkspace.shared.openApplication(at: appURL, configuration: NSWorkspace.OpenConfiguration())
         return l("未找到可定位的桌面会话，已打开 Claude 并复制线程标题；请在 Code 中搜索。终端继续命令可在菜单中复制，不会自动执行。")
     }
+    #endif
 }
 
 enum JournalDesktopSessions {

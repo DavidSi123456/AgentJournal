@@ -707,6 +707,7 @@ final class JournalTests {
         let chinese = JournalText(.chinese)
         XCTAssertEqual(english("应用语言"), "App language")
         XCTAssertEqual(english("生成内容语言"), "Summary language")
+        XCTAssertEqual(english("保存修改"), "Save changes")
         XCTAssertEqual(english("AgentJournal · 两种工具，一份进展"), "AgentJournal · Two tools. One story of progress.")
         XCTAssertEqual(english("%d 个线程", 12), "12 threads")
         XCTAssertEqual(english("%@，%d 个线程", "Oct 1", 3), "Oct 1, 3 threads")
