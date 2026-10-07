@@ -272,7 +272,21 @@ MIT. See [LICENSE](LICENSE). This implementation does not vendor code from other
 
 整体采用紫色界面；Codex 线程为蓝色，Claude Code 线程为橙色，推进助手为青绿色。应用界面可以选择中文或英文，生成内容的语言可以独立设置。
 
-[查看上方三段英文操作演示](#see-it-in-action)：日历与笔记确认、线程进度与每日历史、分享图片导出。录制使用 macOS 演示模式和虚构数据，不调用模型，也不代表 Windows 版本已通过验证。
+### 看看实际操作
+
+以下三段使用 **中文 macOS 演示版**，与前面的英文演示对应。线程标题和笔记均为虚构数据，不调用模型；演示修改只保留在内存中。这些演示不代表 Windows 实验版已通过验证。
+
+#### 1. 回看一天的工作，确认每日笔记
+
+![点击日历选日、筛选 Codex 线程、编辑中文笔记并保存为已确认。](docs/media/agentjournal-daily-zh.gif)
+
+#### 2. 跟踪线程进度，回看每日历史
+
+![按线程查看跨天进展、人工确认完成子项、保存任务树版本并回看较早快照。](docs/media/agentjournal-thread-zh.gif)
+
+#### 3. 导出可以分享的进展图片
+
+![选择日期范围、线程和是否显示标题，预览分页卡片并展示成功导出的中文 PNG。](docs/media/agentjournal-share-zh.gif)
 
 ### 功能
 
