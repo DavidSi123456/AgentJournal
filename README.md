@@ -78,6 +78,8 @@ For a drag-to-Applications installer, run `zsh scripts/build_dmg.sh`. Open the v
 
 Default ZIP/DMG builds are ad-hoc signed, **not Developer ID signed or notarized**; a downloaded test build may be blocked by Gatekeeper. Both assets include SHA-256 checksums and source/signing metadata. Verification does not launch the app and is not a clean-Mac installation test. For a trusted public binary, use your own Developer ID identity and notarize; never disable Gatekeeper globally. See [release preparation](docs/RELEASING.md).
 
+**External installation report (2026-10-08):** the maintainer reports that AgentJournal has been installed and used successfully on another person's Mac. The tested build, macOS version, architecture and download/quarantine conditions were not recorded, so this is a reported smoke test—not verified acceptance of 0.6.2 on every supported Mac, nor proof of Apple signing/notarization. See [verification records](docs/VERIFICATION.md#external-installation-report--2026-10-08).
+
 For a private-data-free demo:
 
 ```sh
@@ -340,6 +342,8 @@ open dist/AgentJournal.app
 需要拖入“应用程序”的安装镜像时，运行 `zsh scripts/build_dmg.sh`。打开带版本号的 DMG，退出旧版 AgentJournal，将应用拖入“应用程序”，推出镜像，再打开安装后的应用。也可以在不受同步服务管理的文件夹中解压带版本号的 ZIP 并安装。不要重新打包开发用的 `dist/AgentJournal.app`：iCloud／File Provider 可能修改它的 Finder 元数据。升级会沿用原有存储标识。
 
 默认 ZIP／DMG 仅做临时签名，**没有 Developer ID 签名或苹果公证**，下载后的测试版本可能被 Gatekeeper 拦截。安装包附带 SHA-256 校验值及源码、签名状态元数据。校验过程不启动应用，也不等于完成了全新 Mac 的安装测试。可信的公开二进制分发需要自己的 Developer ID 证书和公证；不要全局关闭 Gatekeeper。详见[发布准备](docs/RELEASING.md)。
+
+**异机安装反馈（2026-10-08）：**项目维护者反馈，AgentJournal 已在另一位用户的 Mac 上成功安装并使用。具体测试版本、macOS 版本、芯片及下载／隔离属性条件尚未记录，因此这里只记为用户反馈的基础试用，不代表 0.6.2 已在所有支持的 Mac 上完成验收，也不代表已通过苹果签名或公证。详见[验证记录](docs/VERIFICATION.md#external-installation-report--2026-10-08)。
 
 不读取私人数据的演示模式：
 

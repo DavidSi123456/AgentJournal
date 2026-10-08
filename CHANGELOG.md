@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.2 — macOS first-summary workflow (not yet tagged)
+
+- Give the welcome and reading-consent steps opaque, independent pages with nearby actions. Skipping the demo now opens the source-consent step instead of starting a private scan. Previously enabled automatic drafts are disclosed and can be turned off before reading.
+- Connect empty task trees, period reviews and the progress advisor to a one-entry summary preparation screen. Choose a record, write a note or explicitly allow a bounded CLI draft, save, then return. No automatic bulk fill or analysis is started. Keep edited/confirmed notes protected and respect scope, freshness and local request limits.
+- Block advice requests with no usable summaries before reserving a request or calling a model. Prefer summarized threads before the 40-thread input limit. Treat a saved manual note as current evidence for its source snapshot, without claiming task completion.
+- Show current advice coverage, actual request stages, elapsed waiting time and a stop action. Explain whose local CLI account/configuration and provider usage are involved; the CLI default is not presented as a known model before it responds.
+- Distinguish daily entries from cross-date thread overviews; add journal-status filtering and visible state feedback. Clarify that paused/completed states affect journal advice only, keep history, and never close/archive a source-client session. Same-name threads are not merged; reliable parent/fork metadata remains future work.
+- Fold secondary explanations into disclosure sections. Add six synthetic macOS regressions for the first-note path, manual freshness, candidate limits, protected preparation, cancellation and bilingual consent. Windows, portable core and Windows packaging are unchanged.
+- Record the maintainer's report of successful installation/use on another Mac, without attributing it to an unrecorded build or claiming full clean-Mac acceptance, Developer ID signing or notarization.
+
 ## 0.6.1 — task-tree generation and editing fixes (not yet tagged)
 
 - Keep manual task-tree editing and saving available during unrelated summary, advice and report jobs. Show the active job, a stop button and storage errors inside the tree view.

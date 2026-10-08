@@ -17,6 +17,174 @@ final class MockAgentAdvisor: JournalAgentAdvising {
 }
 
 extension JournalTests {
+    @MainActor
+    func testMacFirstSummaryUnlocksAdviceWithoutEmptyCalls() async throws {
+        try write([meta(), codex("2026-09-30T02:00:00Z", "user", "Synthetic first entry")], to: codexFile)
+        let advisor = MockAgentAdvisor(), summarizer = MockSummarizer(), reporter = MockPeriodReporter()
+        let store = JournalStore(directory: root.appendingPathComponent("store"), settings: settings,
+                                 summarizer: summarizer, advisor: advisor, reporter: reporter)
+        await store.refresh(on: Date())
+        let item = try XCTUnwrap(store.activities.first)
+        XCTAssertEqual(store.agentInput.candidates.count, 1)
+        XCTAssertEqual(store.adviceReadyThreadCount, 0)
+        XCTAssertFalse(store.canStartProgressAnalysis)
+        store.analyzeProgress()
+        store.generateReport(kind: .custom, start: store.clock.date(item.day), end: store.clock.date(item.day))
+        store.draftThreadPlan(for: item.threadKey)
+        XCTAssertFalse(store.isModelBusy)
+        XCTAssertEqual(advisor.calls + summarizer.calls + reporter.calls, 0)
+        XCTAssertTrue(store.todayCalls.isEmpty)
+        XCTAssertTrue(store.agentHistory.isEmpty)
+        XCTAssertTrue(store.agentError?.contains("未调用模型") == true)
+        store.generate([item])
+        try await wait(store)
+        XCTAssertEqual(summarizer.calls, 1)
+        XCTAssertEqual(store.adviceReadyThreadCount, 1)
+        XCTAssertTrue(store.canStartProgressAnalysis)
+        store.analyzeProgress()
+        try await waitMacAdvice(store)
+        XCTAssertEqual(advisor.calls, 1)
+        XCTAssertEqual(store.todayCalls.count, 2)
+        XCTAssertEqual(store.agentHistory.count, 1)
+    }
+
+    @MainActor
+    func testMacManualSummaryIsCurrentWithoutCallsOrConfirmation() async throws {
+        try write([meta(), codex("2026-09-30T02:00:00Z", "user", "Synthetic manual note")], to: codexFile)
+        let store = JournalStore(directory: root.appendingPathComponent("store"), settings: settings)
+        await store.refresh(on: Date())
+        let item = try XCTUnwrap(store.activities.first)
+        store.update(item, summary: "A design was discussed; implementation remains.", nextStep: "Verify the design.", category: "研究", confirmed: false)
+        XCTAssertFalse(store.draft(for: item).isConfirmed)
+        XCTAssertEqual(store.draft(for: item).fingerprint, item.fingerprint)
+        XCTAssertEqual(store.agentInput.candidates.first?.records.first?.freshness, "current")
+        XCTAssertEqual(store.progressInput(for: item.threadKey).records.first?.freshness, "current")
+        XCTAssertEqual(store.adviceReadyThreadCount, 1)
+        XCTAssertFalse(store.canGeneratePreparedSummary(item))
+        XCTAssertTrue(store.todayCalls.isEmpty)
+        let reopened = JournalStore(directory: root.appendingPathComponent("store"), settings: settings)
+        await reopened.refresh(on: Date())
+        XCTAssertEqual(reopened.agentInput.candidates.first?.records.first?.freshness, "current")
+    }
+
+    @MainActor
+    func testMacAdvicePrefersUsableNotesBeforeFortyThreadLimit() async throws {
+        let base = storeDateForMacTests()
+        let formatter = ISO8601DateFormatter()
+        for index in 0..<45 {
+            let file = codexFile.deletingLastPathComponent().appendingPathComponent("rollout-\(index).jsonl")
+            try write([meta("mac-synthetic-\(index)"), codex(formatter.string(from: base.addingTimeInterval(Double(-index * 60))), "user", "Synthetic work \(index)")], to: file)
+        }
+        let store = JournalStore(directory: root.appendingPathComponent("store"), settings: settings)
+        await store.refresh(on: base)
+        XCTAssertEqual(store.activities.count, 45)
+        XCTAssertEqual(store.agentInput.candidates.count, 40)
+        XCTAssertEqual(store.adviceReadyThreadCount, 0)
+        let oldest = try XCTUnwrap(store.activities.last)
+        XCTAssertFalse(store.agentInput.candidates.contains { $0.id == oldest.threadKey })
+        store.update(oldest, summary: "One recorded step is ready for review.", nextStep: "Review it.", category: "研究", confirmed: false)
+        XCTAssertEqual(store.agentInput.totalThreads, 45)
+        XCTAssertEqual(store.agentInput.candidates.count, 40)
+        XCTAssertEqual(store.agentInput.candidates.first?.id, oldest.threadKey)
+        XCTAssertEqual(store.adviceReadyThreadCount, 1)
+        for status in [JournalThreadStatus.paused, .completed] {
+            store.setThreadStatus(status, for: oldest.threadKey)
+            XCTAssertEqual(store.adviceReadyThreadCount, 0)
+            XCTAssertFalse(store.canStartProgressAnalysis)
+            XCTAssertEqual(store.history(for: oldest.threadKey).count, 1)
+        }
+        store.setThreadStatus(.active, for: oldest.threadKey)
+        XCTAssertEqual(store.adviceReadyThreadCount, 1)
+        XCTAssertTrue(store.todayCalls.isEmpty)
+    }
+
+    @MainActor
+    func testMacPreparedSummaryRespectsScopeStalenessAndBudget() async throws {
+        try write([meta(), codex("2026-09-30T02:00:00Z", "user", "Synthetic scope")], to: codexFile)
+        let store = JournalStore(directory: root.appendingPathComponent("store"), settings: settings)
+        await store.refresh(on: Date())
+        let item = try XCTUnwrap(store.activities.first)
+        XCTAssertTrue(store.canGeneratePreparedSummary(item))
+        var old = item
+        old.append(JournalExcerpt(timestamp: item.lastActivity.addingTimeInterval(1), role: "assistant", text: "Not the current snapshot"))
+        XCTAssertFalse(store.canGeneratePreparedSummary(old))
+        var unavailable = item; unavailable.excerpts = []
+        XCTAssertFalse(store.canGeneratePreparedSummary(unavailable))
+        try store.configureCalls(daily: 0, automatic: 0, paused: true, includeHistory: false)
+        XCTAssertFalse(store.canGeneratePreparedSummary(item))
+        try store.configureCalls(daily: 20, automatic: 5, paused: true, includeHistory: false)
+        var selected = store.settings; selected.sourceSelection = .claude
+        try store.saveSettings(selected)
+        XCTAssertFalse(store.canGeneratePreparedSummary(item))
+        XCTAssertEqual(store.adviceReadyThreadCount, 0)
+        selected.sourceSelection = .both; try store.saveSettings(selected)
+        XCTAssertTrue(store.canGeneratePreparedSummary(item))
+        store.update(item, summary: "Protected manual note.", nextStep: "", category: "研究", confirmed: true)
+        XCTAssertFalse(store.canGeneratePreparedSummary(item))
+        XCTAssertTrue(store.todayCalls.isEmpty)
+    }
+
+    @MainActor
+    func testMacAdviceWaitingPhaseAndCancellation() async throws {
+        try write([meta(), codex("2026-09-30T02:00:00Z", "user", "Synthetic wait")], to: codexFile)
+        let advisor = MockAgentAdvisor(); advisor.pause = 200_000_000
+        let store = JournalStore(directory: root.appendingPathComponent("store"), settings: settings, advisor: advisor)
+        await store.refresh(on: Date())
+        let item = try XCTUnwrap(store.activities.first)
+        store.update(item, summary: "Explicit unfinished verification.", nextStep: "Verify.", category: "研究", confirmed: false)
+        store.analyzeProgress()
+        XCTAssertTrue(store.isAdvising)
+        XCTAssertFalse(store.canStartProgressAnalysis)
+        XCTAssertNotNil(store.adviceStartedAt)
+        XCTAssertTrue(store.advicePhase == .preparing)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertEqual(advisor.calls, 1)
+        XCTAssertTrue(store.advicePhase == .waitingForCLI)
+        store.cancelAdvice()
+        try await waitMacAdvice(store)
+        XCTAssertNil(store.adviceStartedAt)
+        XCTAssertTrue(store.advicePhase == .idle)
+        XCTAssertNil(store.agentResult)
+        XCTAssertTrue(store.agentHistory.isEmpty)
+        XCTAssertEqual(store.todayCalls.first?.outcome, .cancelled)
+    }
+
+    @MainActor
+    func testMacConsentAndRepairCopyIsBilingual() throws {
+        let english = JournalMacText(.english), chinese = JournalMacText(.chinese)
+        for (key, value) in JournalMacText.english {
+            XCTAssertFalse(key == value)
+            XCTAssertEqual(english(key), value)
+            XCTAssertEqual(chinese(key), key)
+            let pattern = "%[@df]"
+            let regex = try NSRegularExpression(pattern: pattern)
+            XCTAssertEqual(regex.matches(in: key, range: NSRange(key.startIndex..., in: key)).map { (key as NSString).substring(with: $0.range) },
+                           regex.matches(in: value, range: NSRange(value.startIndex..., in: value)).map { (value as NSString).substring(with: $0.range) })
+        }
+        XCTAssertEqual(english("当前可分析：%d / %d 个候选线程有摘要", 1, 3), "Ready to analyze: 1 / 3 candidate threads have summaries")
+        settings.uiLanguage = .english
+        let store = JournalStore(directory: root.appendingPathComponent("store"), settings: settings)
+        let defaultNotice = store.modelAccountNotice(for: settings)
+        XCTAssertTrue(defaultNotice.contains("CLI default"))
+        XCTAssertTrue(defaultNotice.contains("not a developer account"))
+        XCTAssertTrue(defaultNotice.contains("not provider credits or billing"))
+        var custom = settings!; custom.summaryEngine = .claude; custom.model = "synthetic-model"
+        let customNotice = store.modelAccountNotice(for: custom)
+        XCTAssertTrue(customNotice.contains("Claude Code CLI"))
+        XCTAssertTrue(customNotice.contains("synthetic-model"))
+        XCTAssertFalse(customNotice.contains("CLI default"))
+        XCTAssertTrue(store.todayCalls.isEmpty)
+    }
+
+    private func storeDateForMacTests() -> Date { JournalClock(timeZoneID: "Asia/Shanghai").date("2026-09-30") }
+    @MainActor private func waitMacAdvice(_ store: JournalStore) async throws {
+        for _ in 0..<300 {
+            if !store.isAdvising { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("Advice did not settle")
+    }
+
     func testAgentInputIsBoundedProgressOnlyAndDeterministic() throws {
         var activities: [JournalActivity] = []
         var drafts: [String: JournalDraft] = [:]

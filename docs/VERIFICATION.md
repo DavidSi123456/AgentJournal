@@ -1,5 +1,20 @@
 # Local release-preparation verification
 
+## macOS first-summary workflow — 2026-10-08
+
+Candidate: **0.6.2, build 13**, Apple Silicon/macOS 15.7.9. Only macOS UI/store, macOS tests, version metadata and documentation changed; Windows and portable core are unchanged.
+
+- English and Chinese system-default test processes each passed **93 checks**, with **4 optional live checks skipped**. Six new synthetic regressions cover zero-summary request prevention, manual-note freshness, the 40-thread candidate bound, preparation scope/budgets/protected notes, cancellation phases and bilingual consent.
+- Native, isolated synthetic UI checks verified opaque welcome/read-consent pages and the one-entry manual-edit/save/return path. With no notes, task trees and period reviews show preparation actions and advice is disabled. Saving the first unconfirmed manual note unlocks advice and task-tree drafting with current evidence; the account/model consent dialog was inspected and cancelled. No real models or personal journals were used.
+- Release ZIP and read-only mounted DMG passed layout, arm64/minimum-macOS-14, strict ad-hoc signature and bundled privacy checks; SHA-256 sidecars verified. These checks are not Apple notarization or broad machine/OS acceptance.
+- Parent/fork metadata integration remains pending. Same-name or numbered threads are not merged by inference.
+
+## External installation report — 2026-10-08
+
+The maintainer reported that AgentJournal was successfully installed and used on another person's Mac. This records the maintainer's report, not an independently observed test. The tested app version/digest, macOS version, architecture, download method/quarantine state and exact feature coverage were not supplied. Do not attribute this report specifically to 0.6.2 or mark the complete fresh-Mac acceptance checklist as passed. Developer ID signing and Apple notarization remain unverified.
+
+项目维护者反馈：AgentJournal 已在另一位用户的 Mac 上成功安装并使用。这里只记录维护者反馈，非独立现场验收；具体版本／校验值、系统版本、芯片、下载及隔离属性、功能测试范围未提供，不能据此宣称 0.6.2 已完成全新 Mac 全流程验收，也不代表苹果签名或公证已通过。
+
 ## Original preparation snapshot
 
 Date: 2026-10-01. Environment: Apple Silicon, macOS 15.7.9. Candidate: 0.4.1, build 6, local working tree (not a clean tagged release).

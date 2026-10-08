@@ -10,9 +10,13 @@ struct JournalReportsView: View {
     @State private var end: Date
     @State private var selectedID: UUID?
     @State private var showingConsent = false
+    @State private var showingSummaryPreparation = false
     @State private var message: String?
     @State private var page = 0
-    private var l: JournalText { JournalText(store.settings.uiLanguage) }
+    private var l: JournalMacText { JournalMacText(store.settings.uiLanguage) }
+    private var periodActivities: [JournalActivity] {
+        store.activities.filter { $0.day >= input.start && $0.day <= input.end }
+    }
     init(store: JournalStore, date: Date) {
         self.store = store
         let interval = store.clock.calendar.dateInterval(of: .weekOfYear, for: min(date, Date()))!
@@ -58,8 +62,16 @@ struct JournalReportsView: View {
                         .disabled(store.isModelBusy || store.isLoading || !store.canManageWorkflow || input.records.isEmpty || input.start > input.end)
                 }
             }
-            Text(l("只使用期间内已保存的摘要，不自动补齐缺失草稿。最多对比最近 120 条记录，结论可展开核对；历史回顾保留原始版本。"))
-                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                DisclosureGroup(l("工作方式与数据范围")) {
+                    Text(l("只使用期间内已保存的摘要，不自动补齐缺失草稿。最多对比最近 120 条记录，结论可展开核对；历史回顾保留原始版本。"))
+                }.font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if input.missingRecords > 0 {
+                    Button(l("补齐缺少的摘要")) { showingSummaryPreparation = true }
+                        .disabled(!store.canEdit || input.start > input.end)
+                }
+            }
             if input.start > input.end { Text(l("开始日期不能晚于结束日期。")).font(.caption).foregroundStyle(.orange) }
             if let error = store.reportError {
                 HStack {
@@ -93,7 +105,18 @@ struct JournalReportsView: View {
                 Divider()
                 ScrollView {
                     if let selected { reportContent(selected) }
-                    else { Text(l("生成一份回顾，或选择已保存的版本。浏览历史不会调用模型。")).foregroundStyle(.secondary).padding(30) }
+                    else if input.records.isEmpty && input.start <= input.end {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text(l(input.totalRecords > 0 ? "这段时间还没有摘要" : "这段时间没有记录")).font(.title3.bold())
+                            Text(l(input.totalRecords > 0 ? "期间回顾已经可用，但需要先保存每日摘要。先补一条，再回来生成；不会自动批量调用模型。" : "请选择有记录的日期范围；已有历史回顾仍可查看。"))
+                                .font(.callout).foregroundStyle(.secondary)
+                            if input.totalRecords > 0 {
+                                Button(l("先生成或编辑摘要")) { showingSummaryPreparation = true }
+                                    .buttonStyle(.borderedProminent).disabled(!store.canEdit)
+                            }
+                        }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(JournalPalette.purple.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                    } else { Text(l("生成一份回顾，或选择已保存的版本。浏览历史不会调用模型。")).foregroundStyle(.secondary).padding(30) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             if let message { Text(l.message(message)).font(.caption).foregroundStyle(.secondary) }
@@ -112,13 +135,15 @@ struct JournalReportsView: View {
                 .font(.caption2).foregroundStyle(.secondary)
         }.padding(24).frame(width: 1000, height: 690).tint(JournalPalette.purple)
             .environment(\.locale, store.settings.uiLanguage.locale)
+            .sheet(isPresented: $showingSummaryPreparation) { JournalSummaryPreparationView(store: store, activities: periodActivities) }
             .onChange(of: store.reportResult?.id) { _, id in selectedID = id; page = 0 }
             .onDisappear { store.cancelReport() }
             .alert(l("允许生成期间回顾？"), isPresented: $showingConsent) {
                 Button(l("取消"), role: .cancel) {}
                 Button(l("允许")) { store.generateReport(kind: kind, start: start, end: end) }
             } message: {
-                Text(l("将选定期间最多 120 条已保存摘要、标题和后续事项发送到 %@ CLI 的模型提供方，消耗 1 次本地调用额度。可能包含私人文字；不发送原始对话，不使用工具。", store.settings.summaryEngine.label))
+                Text(l("将选定期间最多 120 条已保存摘要、标题和后续事项发送到 %@ CLI 的模型提供方，消耗 1 次本地调用额度。可能包含私人文字；不发送原始对话，不使用工具。", store.settings.summaryEngine.label)
+                    + "\n\n" + store.modelAccountNotice(for: store.settings))
             }
     }
     private func choosePeriod(_ value: JournalPeriodKind, anchor: Date) {

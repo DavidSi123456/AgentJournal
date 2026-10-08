@@ -29,6 +29,7 @@ Automation does not replace a clean-Mac installation test. Record the exact arti
 
 ## Real-machine acceptance — pending until performed
 
+- [x] Record the maintainer's 2026-10-08 report of successful installation and use on another person's Mac. Exact build/machine/download conditions were not supplied; see [the external report](VERIFICATION.md#external-installation-report--2026-10-08). This does not complete the checks below.
 - [ ] Download the final asset via a browser on a second/fresh Apple Silicon Mac; preserve quarantine, verify digest, drag to Applications and launch.
 - [ ] Verify the advertised minimum OS on an actual macOS 14 machine (or explicitly narrow tested-version claims). Packaging an OS target is not runtime verification.
 - [ ] No CLIs, no provider history: choose language, see empty states and diagnostics; no model call or surprise login.

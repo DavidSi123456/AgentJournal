@@ -1,5 +1,7 @@
 import Foundation
 import Darwin
+import SwiftUI
+import AppKit
 
 // Tiny dependency-free assertions let the suite run with Command Line Tools alone.
 struct XCTSkip: Error { let message: String; init(_ message: String) { self.message = message } }
@@ -38,10 +40,44 @@ func XCTAssertThrowsError<T>(_ value: @autoclosure () throws -> T, file: StaticS
 
 @main
 struct CheckRunner {
+    // Only an explicitly marked test bundle enters this UI fixture. Production
+    // binaries never compile this runner. All sources and model clients are fake.
+    @MainActor private static var previewWindow: NSWindow?
+    @MainActor private static func previewMacWorkflow() async throws {
+        let suite = JournalTests()
+        try suite.setUpWithError()
+        suite.settings.uiLanguage = Bundle.main.object(forInfoDictionaryKey: "AgentJournalDemoLanguage") as? String == "en" ? .english : .chinese
+        suite.settings.languageSetupComplete = true
+        suite.settings.onboardingVersion = JournalStore.onboardingVersion
+        let stamp = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-180))
+        try suite.write([suite.meta("synthetic-ux-thread"), suite.codex(stamp, "user", "UX TEST ONLY: review a design, then verify it. No personal history.")], to: suite.codexFile)
+        let store = JournalStore(directory: suite.root.appendingPathComponent("store"), settings: suite.settings,
+            summarizer: MockSummarizer(), advisor: MockAgentAdvisor(), reporter: MockPeriodReporter(), progressDrafter: MockProgressDrafter())
+        await store.refresh(on: Date())
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1420, height: 900),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        window.title = "AgentJournal • SYNTHETIC UX TEST • No real models"
+        window.contentView = NSHostingView(rootView: JournalView(store: store))
+        window.isReleasedWhenClosed = false
+        previewWindow = window
+        let menu = NSMenu(), appItem = NSMenuItem(), appMenu = NSMenu()
+        appMenu.addItem(NSMenuItem(title: "Quit UX Test", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appItem.submenu = appMenu; menu.addItem(appItem); app.mainMenu = menu
+        window.center(); window.makeKeyAndOrderFront(nil)
+        app.run()
+        try suite.tearDownWithError()
+    }
+
     @MainActor
     static func main() async throws {
         // Fatal assertions must not discard buffered RUN/PASS lines in CI logs.
         setbuf(stdout, nil)
+        if Bundle.main.object(forInfoDictionaryKey: "AgentJournalMacUXPreview") as? Bool == true {
+            try await previewMacWorkflow()
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--expect-system-language") {
             guard index + 1 < CommandLine.arguments.count,
                   let expected = JournalInterfaceLanguage(rawValue: CommandLine.arguments[index + 1]) else {
@@ -52,6 +88,12 @@ struct CheckRunner {
         }
         let suite = JournalTests()
         let tests: [(String, () async throws -> Void)] = [
+            ("testMacFirstSummaryUnlocksAdviceWithoutEmptyCalls", { try await suite.testMacFirstSummaryUnlocksAdviceWithoutEmptyCalls() }),
+            ("testMacManualSummaryIsCurrentWithoutCallsOrConfirmation", { try await suite.testMacManualSummaryIsCurrentWithoutCallsOrConfirmation() }),
+            ("testMacAdvicePrefersUsableNotesBeforeFortyThreadLimit", { try await suite.testMacAdvicePrefersUsableNotesBeforeFortyThreadLimit() }),
+            ("testMacPreparedSummaryRespectsScopeStalenessAndBudget", { try await suite.testMacPreparedSummaryRespectsScopeStalenessAndBudget() }),
+            ("testMacAdviceWaitingPhaseAndCancellation", { try await suite.testMacAdviceWaitingPhaseAndCancellation() }),
+            ("testMacConsentAndRepairCopyIsBilingual", { try suite.testMacConsentAndRepairCopyIsBilingual() }),
             ("testTaskTreeCountsConfirmedLeavesAndResearchStages", { try suite.testTaskTreeCountsConfirmedLeavesAndResearchStages() }),
             ("testTaskTreeRejectsCyclesInvalidEvidenceAndForgedCompletion", { try suite.testTaskTreeRejectsCyclesInvalidEvidenceAndForgedCompletion() }),
             ("testTaskTreeInputKeepsBeginningRecentNotesAndProviderIsolation", { try suite.testTaskTreeInputKeepsBeginningRecentNotesAndProviderIsolation() }),

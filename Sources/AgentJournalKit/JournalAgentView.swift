@@ -34,13 +34,15 @@ struct JournalAgentView: View {
     var onViewThread: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var showingConsent = false
+    @State private var showingSummaryPreparation = false
+    @State private var summaryScope: [JournalActivity] = []
     @State private var selectedDay: String
     @State private var selectedResultID: UUID?
     init(store: JournalStore, catalog: JournalModelCatalog, date: Date, onViewThread: @escaping (String) -> Void) {
         self.store = store; self.catalog = catalog; self.onViewThread = onViewThread
         _selectedDay = State(initialValue: store.clock.key(date))
     }
-    private var l: JournalText { JournalText(store.settings.uiLanguage) }
+    private var l: JournalMacText { JournalMacText(store.settings.uiLanguage) }
     private var input: JournalAgentInput { store.agentInput }
     private var dayResults: [JournalAgentResult] {
         let saved = store.advice(on: selectedDay)
@@ -88,13 +90,51 @@ struct JournalAgentView: View {
                 } else {
                     Button(l(store.isDemo ? "查看演示建议" : "分析当前进展")) {
                         if store.isDemo { store.analyzeProgress() } else { showingConsent = true }
-                    }.buttonStyle(.borderedProminent).disabled(busy || input.candidates.isEmpty || !store.canAnalyzeProgress)
+                    }.buttonStyle(.borderedProminent).disabled(busy || !store.canStartProgressAnalysis)
                 }
             }
-            Text(l("新分析始终使用当前进展，并保存到生成当天；选择历史日期只回看，不调用模型。"))
-                .font(.caption).foregroundStyle(.secondary)
-            Text(l("推进助手可单独选择模型。已处理／不采纳的建议在出现新进展前不再重复推荐。"))
-                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text(l("当前可分析：%d / %d 个候选线程有摘要", store.adviceReadyThreadCount, input.candidates.count))
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                if !input.candidates.isEmpty {
+                    Button(l("先生成或编辑摘要")) { prepareSummaries() }.disabled(!store.canEdit)
+                }
+            }
+            if store.adviceReadyThreadCount == 0 {
+                Label(l("零摘要不会调用模型"), systemImage: "lock.shield").foregroundStyle(JournalPalette.green)
+            } else if store.adviceReadyThreadCount == 1 {
+                Text(l("只有一个线程有摘要：可核对它的下一步，不能比较多个线程的优先顺序。"))
+                    .font(.callout).foregroundStyle(.secondary)
+            } else if store.adviceReadyThreadCount < input.candidates.count {
+                Text(l("部分候选缺少摘要，建议只代表已提供的有限进展。"))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            if !store.isDemo && store.remainingCalls == 0 {
+                Text(l("已达到今日模型调用上限；可在调用控制中调整。"))
+                    .font(.callout).foregroundStyle(.orange)
+            }
+            DisclosureGroup(l("工作方式与数据范围")) {
+                Text(l("新分析始终使用当前进展，并保存到生成当天；选择历史日期只回看，不调用模型。"))
+                Text(l("推进助手可单独选择模型。已处理／不采纳的建议在出现新进展前不再重复推荐。"))
+            }.font(.caption).foregroundStyle(.secondary)
+            if store.isAdvising {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text(l(store.advicePhase.label)).font(.headline)
+                    }
+                    if let started = store.adviceStartedAt {
+                        TimelineView(.periodic(from: started, by: 1)) { context in
+                            Text(l("已等待 %d 秒 · 可随时停止", max(0, Int(context.date.timeIntervalSince(started)))))
+                                .font(.callout.monospacedDigit())
+                        }
+                    }
+                    Text(l("模型响应时间取决于所选 CLI、模型和网络；这里不显示虚构进度百分比。"))
+                        .font(.callout).foregroundStyle(.secondary)
+                }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(JournalPalette.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            }
             if let error = store.agentError { Text(l.message(error)).font(.callout).foregroundStyle(.orange) }
             if let error = store.agentHistoryError {
                 HStack {
@@ -114,14 +154,16 @@ struct JournalAgentView: View {
                 }
             }
             Text(l(store.isDemo ? "演示历史仅在内存中，不读取私人记录，不调用模型。" : "建议与依据保存在本机，退出后仍可回看，可能包含私人信息。建议不代表真实优先级；返回客户端不会发送下一步。"))
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(26).frame(width: 1020, height: 690).tint(JournalPalette.green)
+        .padding(26).frame(width: 1020, height: 760).tint(JournalPalette.green)
+        .sheet(isPresented: $showingSummaryPreparation) { JournalSummaryPreparationView(store: store, activities: summaryScope) }
         .alert(l("允许分析线程进展？"), isPresented: $showingConsent) {
             Button(l("取消"), role: .cancel) {}
             Button(l("允许")) { store.analyzeProgress() }
         } message: {
-            Text(l("将最多 40 个线程的标题、日期和最近 3 天的摘要与下一步交给 %@ CLI 的模型提供方并消耗额度。摘要也可能包含私人信息；不会使用工具或修改原线程。", store.settings.adviceSettings.summaryEngine.label))
+            Text(l("将最多 40 个线程的标题、日期和最近 3 天的摘要与下一步交给 %@ CLI 的模型提供方并消耗额度。摘要也可能包含私人信息；不会使用工具或修改原线程。", store.settings.adviceSettings.summaryEngine.label)
+                + "\n\n" + store.modelAccountNotice(for: store.settings.adviceSettings))
         }
         .onChange(of: store.agentResult?.id) { _, _ in
             if let result = store.agentResult { selectedDay = result.day; selectedResultID = result.id }
@@ -191,15 +233,26 @@ struct JournalAgentView: View {
                     .font(.caption2).foregroundStyle(.secondary)
                 Text(l("当时的候选：%d / %d 个线程，每个最多 3 天的摘要。", result.input.candidates.count, result.input.totalThreads))
                     .font(.caption).foregroundStyle(.secondary)
-                if result.response.suggestions.isEmpty { Text(l("暂无有依据的推荐；可先补齐或核对最新进展。")) }
+                if result.response.suggestions.isEmpty {
+                    Text(l("暂无有依据的推荐；可先补齐或核对最新进展。"))
+                    Button(l("核对或补齐当前摘要")) { prepareSummaries() }
+                        .disabled(store.advicePreparationActivities.isEmpty || !store.canEdit)
+                }
                 ForEach(result.response.suggestions) { item in suggestion(item, result: result) }
+            } else if store.isAdvising {
+                Text(l("分析正在进行，完成后会显示结果。历史建议仍可回看，不代表本次分析已完成。"))
+                    .font(.callout).foregroundStyle(.secondary)
             } else {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(l("这一天还没有推进建议")).font(.title3.weight(.semibold))
-                    Text(l("选择左侧已保存的日期回看，或点击分析当前进展。不会为没有记录的过去日期补造建议。"))
+                    Text(l(input.candidates.isEmpty ? "当前没有可分析的线程" : store.adviceReadyThreadCount == 0 ? "第一步：保存一条每日摘要" : "这一天还没有推进建议")).font(.title3.weight(.semibold))
+                    Text(l(input.candidates.isEmpty ? "先读取所选来源的本机记录，或将线程设为进行中／等待中。已搁置和已完成线程的历史仍保留。" : store.adviceReadyThreadCount == 0 ? "选择一条记录保存摘要，再返回这里分析；手动编辑不消耗模型额度。" : "选择左侧已保存的日期回看，或点击分析当前进展。不会为没有记录的过去日期补造建议。"))
                         .foregroundStyle(.secondary)
                     Text(l("先生成或编辑线程的每日摘要，再点击分析。助手只使用这里保存的摘要与下一步，不发送原始对话、项目路径或日程数据。"))
                         .foregroundStyle(.secondary)
+                    if !input.candidates.isEmpty {
+                        Button(l("先生成或编辑摘要")) { prepareSummaries() }
+                            .buttonStyle(.borderedProminent).disabled(!store.canEdit)
+                    }
                 }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
                     .background(JournalPalette.green.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
             }
@@ -210,12 +263,18 @@ struct JournalAgentView: View {
                         Text(candidate.title).font(.caption).lineLimit(2)
                         Spacer()
                         Text(candidate.lastDay).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                        Text(l(candidate.records.first?.freshness == "current" ? "摘要最新" : "需补齐摘要"))
+                        Text(l(candidate.records.first?.freshness == "current" ? "摘要最新" : candidate.records.first?.freshness == "outdated" ? "摘要已过期" : "尚无摘要"))
                             .font(.caption).foregroundStyle(.secondary)
+                        Button(l("查看补齐路径")) { prepareSummaries(store.history(for: candidate.id)) }
+                            .font(.caption).disabled(store.history(for: candidate.id).isEmpty || !store.canEdit)
                     }.padding(.vertical, 4)
                 }
             }.font(.caption).padding(.top, 12)
         }
+    }
+    private func prepareSummaries(_ items: [JournalActivity]? = nil) {
+        summaryScope = items ?? store.advicePreparationActivities
+        showingSummaryPreparation = true
     }
     private func versionTitle(_ result: JournalAgentResult) -> String {
         let index = dayResults.firstIndex { $0.id == result.id } ?? 0

@@ -10,6 +10,7 @@ public struct JournalView: View {
     @State private var search = ""
     @State private var sourceFilter = "all"
     @State private var category = "全部"
+    @State private var statusFilter = "all"
     @State private var viewMode = "day"
     @State private var editing: JournalActivity?
     @State private var showingSettings = false
@@ -17,6 +18,7 @@ public struct JournalView: View {
     @State private var showingAgent = false
     @State private var showingManagement = false
     @State private var showingReports = false
+    @State private var showingSummaryPreparation = false
     @State private var progressActivity: JournalActivity?
     @State private var showingOnboarding: Bool
     @State private var showingDemo = false
@@ -42,6 +44,7 @@ public struct JournalView: View {
             let draft = store.draft(for: activity)
             return store.settings.includesProvider(activity.source) && (sourceFilter == "all" || activity.source.rawValue == sourceFilter)
                 && (category == "全部" || draft.category == category)
+                && (statusFilter == "all" || store.threadStatus(activity.threadKey).rawValue == statusFilter)
                 && (search.isEmpty || (activity.title + draft.displaySummary + activity.cwd)
                     .localizedCaseInsensitiveContains(search))
         }
@@ -57,7 +60,7 @@ public struct JournalView: View {
     private var listItems: [JournalActivity] { viewMode == "day" ? dayItems : threadItems }
     private var history: [JournalActivity] { selectedThreadKey.map { store.history(for: $0) } ?? [] }
     private var purple: Color { JournalPalette.purple }
-    private var l: JournalText { JournalText(store.settings.uiLanguage) }
+    private var l: JournalMacText { JournalMacText(store.settings.uiLanguage) }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -85,10 +88,11 @@ public struct JournalView: View {
         .sheet(isPresented: $showingShare) { JournalShareView(store: store, date: selectedDate) }
         .sheet(isPresented: $showingManagement) { JournalManagementView(store: store) }
         .sheet(isPresented: $showingReports) { JournalReportsView(store: store, date: selectedDate) }
+        .sheet(isPresented: $showingSummaryPreparation) { JournalSummaryPreparationView(store: store, activities: listItems) }
         .sheet(item: $progressActivity) { JournalThreadProgressView(store: store, activity: $0) }
         .sheet(isPresented: $showingAgent) {
             JournalAgentView(store: store, catalog: modelCatalog, date: selectedDate) { key in
-                search = ""; category = "全部"; sourceFilter = "all"; viewMode = "thread"
+                search = ""; category = "全部"; sourceFilter = "all"; statusFilter = "all"; viewMode = "thread"
                 selectedThreadKey = key
             }
         }
@@ -103,7 +107,8 @@ public struct JournalView: View {
                 forceAfterConsent = false
             }
         } message: {
-            Text(l("选中线程的少量对话摘录会交给 %@ CLI，发送到其配置的模型提供方并消耗额度。原始日志只读，生成任务不能使用工具。", store.settings.summaryEngine.label))
+            Text(l("选中线程的少量对话摘录会交给 %@ CLI，发送到其配置的模型提供方并消耗额度。原始日志只读，生成任务不能使用工具。", store.settings.summaryEngine.label)
+                + "\n\n" + store.modelAccountNotice(for: store.settings))
         }
         .task(id: store.clock.key(selectedDate)) {
             await store.refresh(on: selectedDate)
@@ -119,6 +124,8 @@ public struct JournalView: View {
         .onChange(of: selectedThreadKey) { _, key in store.followThread(key) }
         .onChange(of: sourceFilter) { _, _ in selectFirstIfNeeded() }
         .onChange(of: category) { _, _ in selectFirstIfNeeded() }
+        .onChange(of: statusFilter) { _, _ in selectFirstIfNeeded() }
+        .onChange(of: listItems.map(\.id)) { _, _ in selectFirstIfNeeded() }
         .onChange(of: search) { _, _ in selectFirstIfNeeded() }
         .onChange(of: viewMode) { _, _ in selectFirstIfNeeded() }
         .onChange(of: store.settingsRequest) { _, _ in if !showingOnboarding { showingSettings = true } }
@@ -315,10 +322,14 @@ public struct JournalView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(viewMode == "day" ? l.date(selectedDate, clock: store.clock, style: .dayWithWeekday) : l("全部线程"))
+                        Text(viewMode == "day" ? l.date(selectedDate, clock: store.clock, style: .dayWithWeekday) : l("跨天线程总览"))
                             .font(.title2.weight(.bold))
-                        Text(l(viewMode == "day" ? "今天处理了什么" : "找到一个线程，回看它的每一天"))
+                        Text(l(viewMode == "day" ? "本日记录 · 仅这一天" : "每个线程只列一张卡片；右侧串起它在不同日期的记录。"))
                             .font(.subheadline).foregroundStyle(.secondary)
+                        if viewMode == "thread", let first = filtered.map(\.day).min(), let last = filtered.map(\.day).max() {
+                            Text(l("%@ — %@ · %d 个记录日", first, last, Set(filtered.map(\.day)).count))
+                                .font(.caption).foregroundStyle(purple)
+                        }
                     }
                     Spacer()
                     Picker(l("浏览方式"), selection: $viewMode) {
@@ -349,12 +360,31 @@ public struct JournalView: View {
                     Text("Codex").tag("codex")
                     Text("Claude Code").tag("claude")
                 }.pickerStyle(.segmented)
+                Picker(l("推进状态"), selection: $statusFilter) {
+                    Text(l("全部状态")).tag("all")
+                    ForEach(JournalThreadStatus.allCases, id: \.self) { Text(l($0.label)).tag($0.rawValue) }
+                }.frame(maxWidth: 260, alignment: .leading)
+                if viewMode == "thread" {
+                    DisclosureGroup(l("分支与同名线程")) {
+                        Text(l("目前按独立会话 ID 保留线程。同名或带编号不代表已确认的 fork 关系，不能直接合并；父子关联仍待可靠元数据支持。"))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.font(.caption).foregroundStyle(.secondary)
+                }
             }.padding(20)
             Divider()
+            if !listItems.isEmpty && listItems.allSatisfy({ store.draft(for: $0).displaySummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(l("第一步：保存一条每日摘要")).font(.headline)
+                    Text(l("记录已读入。先保存一条摘要，再建立任务树、生成回顾或获得推进建议。"))
+                        .font(.callout).foregroundStyle(.secondary)
+                    Button(l("先选一条记录开始")) { showingSummaryPreparation = true }
+                        .buttonStyle(.borderedProminent).disabled(!store.canEdit)
+                }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(purple.opacity(0.06))
+            }
             ScrollView {
                 LazyVStack(spacing: 13) {
                     if listItems.isEmpty {
-                        emptyState(l("这一天，留一点空白"), detail: l("没有符合条件的线程。\n可以选择有记录的日期，或切换到“按线程”。"), icon: "sparkles")
+                        emptyState(l(viewMode == "day" ? "这一天，留一点空白" : "当前筛选没有线程"), detail: l("没有符合条件的线程。\n可以选择有记录的日期，或切换到“按线程”。"), icon: "sparkles")
                     } else { ForEach(listItems) { activityCard($0) } }
                 }.padding(18)
             }
@@ -383,6 +413,9 @@ public struct JournalView: View {
                     HStack {
                         badge(activity.source.label, color: color)
                         badge(l.category(draft.category), color: purple)
+                        if store.threadStatus(activity.threadKey) != .active {
+                            badge(l(store.threadStatus(activity.threadKey).label), color: JournalPalette.green)
+                        }
                         Spacer()
                         if draft.isConfirmed { Image(systemName: "checkmark.seal.fill").foregroundStyle(.green) }
                         Text(viewMode == "day" ? store.clock.label(activity.lastActivity, "HH:mm") : l.date(activity.lastActivity, clock: store.clock, style: .calendarDay))
@@ -450,8 +483,12 @@ public struct JournalView: View {
                         set: { store.setThreadStatus($0, for: activity.threadKey) })) {
                         ForEach(JournalThreadStatus.allCases, id: \.self) { Text(l($0.label)).tag($0) }
                     }.font(.caption).disabled(!store.canManageWorkflow || store.isAdvising)
-                    Text(l("已完成或暂时搁置的线程不进入推进分析；每日记录仍然保留。"))
-                        .font(.caption2).foregroundStyle(.secondary)
+                    Text(l("状态只影响 AgentJournal，不会关闭或归档原客户端会话。"))
+                        .font(.callout).foregroundStyle(.secondary)
+                    DisclosureGroup(l("推进状态")) {
+                        Text(l("进行中：参与推进分析。等待中：保留等待条件，可核对进展。暂时搁置／已完成：不参与推进分析，历史仍保留。"))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.font(.caption).foregroundStyle(.secondary)
                     JournalOpenThreadButton(activity: activity, language: store.settings.uiLanguage, disabled: store.isDemo)
                         .font(.caption)
                     Button { progressActivity = activity } label: {
@@ -575,6 +612,116 @@ public struct JournalView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try store.markdown(for: items, title: title).write(to: url, atomically: true, encoding: .utf8) }
         catch { store.errorMessage = l("导出失败：") + error.localizedDescription }
+    }
+}
+
+/// One-entry preparation shared by the macOS tree, report and advisor sheets.
+/// Opening it never scans sources or starts a model request.
+struct JournalSummaryPreparationView: View {
+    @ObservedObject var store: JournalStore
+    let activities: [JournalActivity]
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedID: String?
+    @State private var editing: JournalActivity?
+    @State private var showingConsent = false
+    @State private var pending: JournalActivity?
+    private var l: JournalMacText { JournalMacText(store.settings.uiLanguage) }
+    init(store: JournalStore, activities: [JournalActivity]) {
+        self.store = store; self.activities = activities
+        let sorted = activities.sorted { $0.lastActivity > $1.lastActivity }
+        _selectedID = State(initialValue: (sorted.first {
+            store.draft(for: $0).displaySummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } ?? sorted.first)?.id)
+    }
+    private var items: [JournalActivity] {
+        let ids = Set(activities.map(\.id))
+        return store.activities.filter { ids.contains($0.id) }.sorted {
+            $0.lastActivity == $1.lastActivity ? $0.id < $1.id : $0.lastActivity > $1.lastActivity
+        }
+    }
+    private var selected: JournalActivity? { items.first { $0.id == selectedID } ?? items.first }
+    private var savedCount: Int {
+        items.filter { !store.draft(for: $0).displaySummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label(l("先补齐一条每日摘要"), systemImage: "square.and.pencil").font(.title2.bold())
+                Spacer()
+                Button(l("返回继续")) { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+            Text(l("选择一条记录，生成模型草稿或手动写一句进展。保存后再返回原界面继续；不会自动开始分析或批量补齐。"))
+                .font(.callout).foregroundStyle(.secondary)
+            Text(l("%d 条记录 · %d 条已保存摘要", items.count, savedCount)).font(.callout.bold()).foregroundStyle(JournalPalette.purple)
+            Divider()
+            HStack(alignment: .top, spacing: 20) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(items) { item in
+                            Button { selectedID = item.id } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("\(item.source.shortLabel) · \(item.day)").font(.caption).foregroundStyle(JournalPalette.source(item.source))
+                                    Text(item.title).font(.subheadline.bold()).lineLimit(2)
+                                    Text(l(store.draft(for: item).displaySummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "尚无摘要" : "已保存摘要，可以返回继续。"))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(selected?.id == item.id ? JournalPalette.purple.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }.frame(width: 285)
+                Divider()
+                ScrollView {
+                    if let item = selected { entry(item) }
+                    else { Text(l("当前范围没有可编辑的记录，请返回调整日期或来源。")).foregroundStyle(.secondary) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }.frame(maxHeight: .infinity)
+            if let error = store.errorMessage { Text(l.message(error)).foregroundStyle(.orange) }
+        }.padding(24).frame(width: 880, height: 610).tint(JournalPalette.purple)
+            .environment(\.locale, store.settings.uiLanguage.locale)
+            .sheet(item: $editing) { JournalDraftEditor(store: store, activity: $0) }
+            .alert(l("允许生成模型摘要？"), isPresented: $showingConsent) {
+                Button(l("取消"), role: .cancel) { pending = nil }
+                Button(l("允许")) {
+                    if let item = pending, store.canGeneratePreparedSummary(item) { store.generate([item]) }
+                    pending = nil
+                }
+            } message: {
+                Text(l("仅这条记录的有限对话摘录会发送给所选 CLI；生成前会再次确认。手动编辑不调用模型。")
+                    + "\n\n" + store.modelAccountNotice(for: store.settings))
+            }
+    }
+    private func entry(_ item: JournalActivity) -> some View {
+        let draft = store.draft(for: item)
+        return VStack(alignment: .leading, spacing: 16) {
+            Text(item.title).font(.headline)
+            Text("\(item.day) · \(item.source.label)").font(.callout).foregroundStyle(.secondary)
+            if !draft.displaySummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Label(l("已保存摘要，可以返回继续。"), systemImage: "checkmark.seal.fill").foregroundStyle(JournalPalette.green)
+                Text(draft.displaySummary).lineSpacing(4).textSelection(.enabled)
+                if !draft.displayNextStep.isEmpty { Text(l("后续：%@", draft.displayNextStep)).foregroundStyle(.secondary) }
+            } else { Text(l("第一步：保存一条每日摘要")).font(.title3.bold()) }
+            if store.isSummarizing {
+                ProgressView(l.message(store.progressText))
+                Button(l("停止生成")) { store.cancelGeneration() }
+            } else {
+                Button(l("生成这条摘要")) { pending = item; showingConsent = true }
+                    .buttonStyle(.borderedProminent).disabled(!store.canGeneratePreparedSummary(item))
+            }
+            Button(l("手动编辑摘要")) { editing = item }.disabled(!store.canEdit || store.isLoading)
+            if store.isDemo { Text(l("演示模式不调用模型，可以手动编辑示例。")) }
+            else if item.excerpts.isEmpty { Text(l("原始摘录已不在本机，可手动补充摘要。")) }
+            else if draft.editedSummary != nil || draft.isConfirmed {
+                Text(l("已编辑或确认的笔记不会被模型覆盖；如需调整，请手动编辑。"))
+            } else if draft.fingerprint == item.fingerprint {
+                Text(l("已有当前模型草稿，可手动核对；不会为相同记录重复调用模型。"))
+            }
+            if !store.isDemo && store.remainingCalls == 0 {
+                Text(l("已达到今日模型调用上限；可在调用控制中调整。")).foregroundStyle(.orange)
+            }
+            Text(l("仅这条记录的有限对话摘录会发送给所选 CLI；生成前会再次确认。手动编辑不调用模型。"))
+                .font(.callout).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

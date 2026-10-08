@@ -1,4 +1,4 @@
-# AgentJournal 0.5.0 Beta
+# AgentJournal 0.6.2 Beta
 
 A native, bilingual macOS journal for local Codex and Claude Code history: daily notes, thread timelines, progress follow-through, bounded optional model drafts, real weekly/monthly reviews and local sharing.
 
@@ -9,6 +9,11 @@ A native, bilingual macOS journal for local Codex and Claude Code history: daily
 - A CLI is not needed to browse local history. Model features require an installed/authenticated Codex or Claude Code CLI and separate consent; they consume provider/account usage.
 
 ## Changes
+
+- macOS-only first-summary workflow: opaque onboarding and reading consent; one-entry summary preparation from empty task trees, period reviews and advice; no model request with zero summaries; manual-note freshness; advice stages/wait time/stop; journal-status filtering and clearer CLI-account consent. Windows and portable core are unchanged.
+- Editable task trees with human-confirmed leaf progress or research stages, immutable daily history and protected manual edits. Model completion proposals are not confirmed progress.
+- Built-in synthetic demo/tour, source selection and configurable sharing previews with optional thread titles and repository credit.
+- English/Chinese synthetic tests each pass 93 checks (4 optional live checks skipped). A maintainer-reported installation/use on another Mac is recorded, but its exact build/machine/download conditions are unknown; it does not establish Apple notarization or complete fresh-Mac acceptance.
 
 - Saved thread lifecycle states and advice feedback; no repeated handled/dismissed advice until progress changes. Paused/completed threads are excluded from analysis without hiding daily notes.
 - Independent advisor model, preview queue, immediate auto-draft pause, optional historical fill, and persisted daily limits for local CLI generation jobs. Counts are not provider billing or account usage.

@@ -48,13 +48,14 @@ struct JournalThreadProgressView: View {
     @State private var editingNode: JournalTaskNode?
     @State private var deletingNode: JournalTaskNode?
     @State private var showingConsent = false
+    @State private var showingSummaryPreparation = false
     @State private var showingDiscard = false
     @State private var showingReload = false
     @State private var restoring: JournalProgressSnapshot?
     @State private var selectedSnapshotID: UUID?
     @State private var tab = "tree"
     @State private var message: String?
-    private var l: JournalText { JournalText(store.settings.uiLanguage) }
+    private var l: JournalMacText { JournalMacText(store.settings.uiLanguage) }
     private var dirty: Bool { plan != baseline }
     private var input: JournalProgressInput { store.progressInput(for: activity.threadKey) }
     private var history: [JournalProgressSnapshot] { store.threadProgress.history(activity.threadKey) }
@@ -90,8 +91,9 @@ struct JournalThreadProgressView: View {
                     }.disabled(dirty || !store.canDraftThreadPlan || input.records.isEmpty)
                 }
             }
-            Text(l("仅点击生成时调用模型。完成项必须人工确认；模型不会覆盖人工修改的节点，也不会执行原线程。"))
-                .font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup(l("草拟与进度规则")) {
+                Text(l("仅点击生成时调用模型。完成项必须人工确认；模型不会覆盖人工修改的节点，也不会执行原线程。"))
+            }.font(.caption).foregroundStyle(.secondary)
             if let status = store.threadPlanBackgroundMessage {
                 HStack {
                     Text(l(status)).font(.caption).foregroundStyle(.secondary)
@@ -124,6 +126,9 @@ struct JournalThreadProgressView: View {
         }.padding(24).frame(width: 1000, height: 760).tint(JournalPalette.purple)
             .environment(\.locale, store.settings.uiLanguage.locale)
             .interactiveDismissDisabled(dirty)
+            .sheet(isPresented: $showingSummaryPreparation) {
+                JournalSummaryPreparationView(store: store, activities: store.history(for: activity.threadKey))
+            }
             .sheet(item: $editingNode) { node in
                 JournalTaskNodeEditor(node: node, plan: plan, language: store.settings.uiLanguage) { edited in
                     if let index = plan.nodes.firstIndex(where: { $0.id == edited.id }) { plan.nodes[index] = edited }
@@ -134,7 +139,8 @@ struct JournalThreadProgressView: View {
                 Button(l("取消"), role: .cancel) {}
                 Button(l("允许")) { store.draftThreadPlan(for: activity.threadKey) }
             } message: {
-                Text(l("仅将这个线程的标题、现有任务树、最多 60 条已保存每日摘要与下一步交给 %@ CLI 的模型提供方并消耗额度。不发送原始聊天摘录；任务树及摘要仍可能含私人信息。", store.settings.summaryEngine.label))
+                Text(l("仅将这个线程的标题、现有任务树、最多 60 条已保存每日摘要与下一步交给 %@ CLI 的模型提供方并消耗额度。不发送原始聊天摘录；任务树及摘要仍可能含私人信息。", store.settings.summaryEngine.label)
+                    + "\n\n" + store.modelAccountNotice(for: store.settings))
             }
             .alert(l("放弃未保存修改？"), isPresented: $showingDiscard) {
                 Button(l("取消"), role: .cancel) {}
@@ -173,6 +179,26 @@ struct JournalThreadProgressView: View {
     }
     private var editor: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if plan.nodes.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(l("任务树还未建立")).font(.title3.bold())
+                    Text(l(input.records.isEmpty ? "自动草拟需要至少一条已保存摘要；也可以不调用模型，手动建立第一项任务。" : "已有摘要，可自动草拟，也可手动建立任务。完成项始终需要人工确认。"))
+                        .font(.callout).foregroundStyle(.secondary)
+                    HStack {
+                        if input.records.isEmpty {
+                            Button(l("先生成或编辑摘要")) { showingSummaryPreparation = true }
+                                .buttonStyle(.borderedProminent).disabled(!store.canEdit)
+                        } else {
+                            Button(l("从现有摘要草拟任务树")) {
+                                if store.isDemo { store.draftThreadPlan(for: activity.threadKey) } else { showingConsent = true }
+                            }.buttonStyle(.borderedProminent).disabled(dirty || !store.canDraftThreadPlan)
+                        }
+                        Button(l("手动新增第一项")) { editingNode = JournalTaskNode(title: "", userEdited: true) }
+                            .disabled(!store.canEditThreadPlan)
+                    }
+                }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(JournalPalette.purple.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+            }
             TextField(l("线程目标"), text: $plan.goal).textFieldStyle(.roundedBorder)
                 .onChange(of: plan.goal) { _, _ in if plan.goal != baseline.goal { plan.goalEdited = true } }
             HStack {
@@ -185,22 +211,20 @@ struct JournalThreadProgressView: View {
                         .onChange(of: plan.stage) { _, _ in if plan.stage != baseline.stage { plan.stageEdited = true } }
                 }
             }
-            if plan.kind == .fixed {
+            if plan.kind == .fixed && !plan.nodes.isEmpty {
                 Toggle(l("确认这棵树代表当前目标范围"), isOn: $plan.scopeConfirmed).disabled(plan.nodes.isEmpty)
                 Text(l("新增、删除、改名或调整层级后需重新确认范围。百分比仅反映已确认完成的子项数。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            JournalThreadProgressSummary(plan: plan, language: store.settings.uiLanguage)
+            if !plan.nodes.isEmpty {
+                JournalThreadProgressSummary(plan: plan, language: store.settings.uiLanguage)
                 .padding(14).background(JournalPalette.purple.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+            }
             HStack {
                 Text(l("任务与子项")).font(.headline)
                 Spacer()
                 Button(l("新增任务")) { editingNode = JournalTaskNode(title: "", userEdited: true) }
                     .disabled(plan.nodes.count >= 80 || !store.canEditThreadPlan)
-            }
-            if plan.nodes.isEmpty {
-                Text(l("可自动草拟，也可手动建立。没有已保存摘要时，不会凭聊天数量推算进度。"))
-                    .foregroundStyle(.secondary).padding(.vertical, 20)
             }
             ForEach(plan.orderedNodes, id: \.node.id) { row in
                 nodeRow(row.node, depth: row.depth, tree: plan, editable: true)
@@ -209,14 +233,16 @@ struct JournalThreadProgressView: View {
             let coverage = plan.inputFingerprint == nil ? input.coverage : plan.coverage
             Text(l("依据覆盖：共 %d 天记录 · 提供 %d 条摘要 · %d 天缺摘要 · %d 条已过时", coverage.total,
                 coverage.supplied, coverage.missing, coverage.outdated)).font(.caption).foregroundStyle(.secondary)
-            Text(l("历史较长时使用最早 8 条和最新 52 条摘要，文字可能截断；不代表掌握完整对话或全部工作。"))
-                .font(.caption2).foregroundStyle(.secondary)
             if let fingerprint = plan.inputFingerprint, fingerprint != input.fingerprint {
                 Text(l("摘要有变化，可更新任务树；现有确认与历史不会自动改变。")).font(.caption).foregroundStyle(.orange)
             }
-            if let engine = plan.engine {
-                Text("\(l.message(engine)) · \(store.isDemo ? l("示例数据 · 未调用模型") : plan.model ?? l("模型未报告"))")
-                    .font(.caption2).foregroundStyle(.secondary)
+            DisclosureGroup(l("依据与覆盖详情")) {
+                Text(l("历史较长时使用最早 8 条和最新 52 条摘要，文字可能截断；不代表掌握完整对话或全部工作。"))
+                    .font(.callout).foregroundStyle(.secondary)
+                if let engine = plan.engine {
+                    Text("\(l.message(engine)) · \(store.isDemo ? l("示例数据 · 未调用模型") : plan.model ?? l("模型未报告"))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }.disabled(!store.canEditThreadPlan)
     }

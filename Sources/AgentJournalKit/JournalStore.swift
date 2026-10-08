@@ -1,6 +1,19 @@
 import Foundation
 import Combine
 
+enum JournalAdvicePhase {
+    case idle, preparing, waitingForCLI, checking, saving
+    var label: String {
+        switch self {
+        case .idle: return ""
+        case .preparing: return "正在准备本次分析"
+        case .waitingForCLI: return "正在等待 CLI 返回分析结果"
+        case .checking: return "正在核对结果与摘要依据"
+        case .saving: return "正在保存建议和每日历史"
+        }
+    }
+}
+
 @MainActor
 public final class JournalStore: ObservableObject {
     @Published private(set) var activities: [JournalActivity] = [] { didSet { cachedAgentInput = nil } }
@@ -9,6 +22,8 @@ public final class JournalStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isSummarizing = false
     @Published private(set) var isAdvising = false
+    @Published private(set) var adviceStartedAt: Date?
+    @Published private(set) var advicePhase: JournalAdvicePhase = .idle
     @Published private(set) var isReporting = false
     @Published private(set) var isDraftingTasks = false
     @Published private(set) var threadProgress = JournalProgressState()
@@ -55,7 +70,7 @@ public final class JournalStore: ObservableObject {
     var needsLanguageSetup: Bool { requiresLanguageSetup && settings.languageSetupComplete != true && canEdit }
     static let onboardingVersion = 1
     var needsOnboarding: Bool { requiresLanguageSetup && settings.onboardingVersion != Self.onboardingVersion && canEdit }
-    private var l: JournalText { JournalText(settings.uiLanguage) }
+    private var l: JournalMacText { JournalMacText(settings.uiLanguage) }
     public var settingsMenuTitle: String { l("设置…") }
     public var waitingForLanguageSelection: Bool { needsLanguageSetup || needsOnboarding }
     public func openSettings() { settingsRequest += 1 }
@@ -358,14 +373,48 @@ public final class JournalStore: ObservableObject {
     private func currentAgentInput() -> (input: JournalAgentInput, fingerprint: String, expires: Date) {
         let now = Date()
         if let cached = cachedAgentInput, now < cached.expires { return cached }
-        let input = JournalAgentInput.build(activities: activities, drafts: drafts, now: now,
-                                            threads: workflow.threads, feedback: workflow.feedback)
+        var input = JournalAgentInput.build(activities: activities.filter {
+            settings.includesProvider($0.source) && settings.includesProject($0.cwd)
+        }, drafts: drafts, now: now, limit: Int.max, threads: workflow.threads, feedback: workflow.feedback)
+        // Prefer usable notes before applying the existing 40-thread bound. A
+        // single older summarized thread must not be hidden by 40 empty ones.
+        let ready = input.candidates.filter(Self.hasAdviceSummary)
+        let missing = input.candidates.filter { !Self.hasAdviceSummary($0) }
+        input.candidates = Array((ready + missing).prefix(40))
         let expires = activities.lazy.map { $0.lastActivity.addingTimeInterval(60) }.filter { $0 > now }.min() ?? .distantFuture
         let value = (input: input, fingerprint: input.fingerprint, expires: expires)
         cachedAgentInput = value
         return value
     }
     var canAnalyzeProgress: Bool { canEdit && canManageWorkflow && (canSaveAgentHistory || isDemo) }
+    static func hasAdviceSummary(_ candidate: JournalAgentCandidate) -> Bool {
+        candidate.records.contains { !$0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+    var adviceReadyThreadCount: Int { agentInput.candidates.filter(Self.hasAdviceSummary).count }
+    var canStartProgressAnalysis: Bool {
+        canAnalyzeProgress && !isModelBusy && !isLoading && !needsLanguageSetup && !needsOnboarding
+            && adviceReadyThreadCount > 0 && (isDemo || remainingCalls > 0)
+    }
+    var advicePreparationActivities: [JournalActivity] {
+        let ids = Set(agentInput.candidates.flatMap { $0.records.map(\.id) })
+        return activities.filter { ids.contains($0.id) }.sorted { $0.lastActivity > $1.lastActivity }
+    }
+    func canGeneratePreparedSummary(_ activity: JournalActivity) -> Bool {
+        guard let current = activities.first(where: { $0.id == activity.id }),
+              current.fingerprint == activity.fingerprint,
+              settings.includesProvider(activity.source), settings.includesProject(activity.cwd) else { return false }
+        let draft = draft(for: activity)
+        return !isDemo && !isLoading && !isModelBusy && canEdit && canManageWorkflow
+            && !needsLanguageSetup && !needsOnboarding && remainingCalls > 0
+            && !activity.excerpts.isEmpty && draft.editedSummary == nil && !draft.isConfirmed
+            && draft.fingerprint != activity.fingerprint
+    }
+    func modelAccountNotice(for request: JournalSettings) -> String {
+        [l("请求引擎：%@ CLI", request.summaryEngine.label),
+         l("请求模型：%@", request.model.isEmpty ? l("CLI 默认（实际模型将在返回后报告）") : request.model),
+         l("使用你在这台 Mac 上的 CLI 登录／配置，不是开发者账户。额度和费用归属该 CLI 当前账户及其配置的提供方；AgentJournal 不提供免费模型额度，也无法预报具体费用。"),
+         l("本地调用上限不是供应商剩余额度或账单。")].joined(separator: "\n")
+    }
     var agentHistoryDays: [String] { Set(agentHistory.map(\.day)).sorted(by: >) }
     func advice(on day: String) -> [JournalAgentResult] { agentHistory.filter { $0.day == day } }
     func hasAdvice(on date: Date) -> Bool {
@@ -387,6 +436,10 @@ public final class JournalStore: ObservableObject {
         guard !isInitializing, !isModelBusy, !isLoading, canAnalyzeProgress, !needsLanguageSetup, !needsOnboarding else { return }
         let input = agentInput
         guard !input.candidates.isEmpty else { return }
+        guard input.candidates.contains(where: Self.hasAdviceSummary) else {
+            agentError = "当前候选没有可用摘要。先生成或编辑一条每日摘要，再分析；本次未调用模型。"
+            return
+        }
         agentError = nil
         if isDemo {
             let result = JournalCLIAgentAdvisor.demo(input, settings: settings)
@@ -398,18 +451,23 @@ public final class JournalStore: ObservableObject {
         }
         let generationSettings = settings.adviceSettings
         isAdvising = true
+        adviceStartedAt = Date()
+        advicePhase = .preparing
         advisorTask = Task {
-            defer { isAdvising = false; advisorTask = nil }
+            defer { isAdvising = false; advicePhase = .idle; adviceStartedAt = nil; advisorTask = nil }
             var callID: UUID?
             do {
                 callID = try reserveCall(.advice, settings: generationSettings, itemCount: input.candidates.count)
+                advicePhase = .waitingForCLI
                 let result = try await advisor.advise(input, settings: generationSettings)
                 guard !Task.isCancelled else { finishCall(callID, outcome: .cancelled); return }
+                advicePhase = .checking
                 try JournalCLIAgentAdvisor.validate(result.response, input: input)
                 // Keep the original input snapshot for inspectable evidence. Never change notes or source threads.
                 let snapshot = JournalAgentResult(response: result.response, input: input, engine: result.engine, model: result.model,
                     timeZoneID: generationSettings.timeZoneID, languageCode: generationSettings.summaryLanguage.rawValue)
                 agentResult = snapshot
+                advicePhase = .saving
                 saveAdvice(snapshot)
                 finishCall(callID, outcome: .succeeded)
             } catch {
@@ -438,6 +496,8 @@ public final class JournalStore: ObservableObject {
         var draft = draft(for: activity)
         draft.editedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
         draft.editedNextStep = nextStep.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A manual note describes this source snapshot, even without confirmation.
+        draft.fingerprint = activity.fingerprint
         draft.category = category
         draft.confirmedAt = confirmed ? Date() : nil
         draft.confirmedFingerprint = confirmed ? activity.fingerprint : nil
@@ -567,7 +627,10 @@ public final class JournalStore: ObservableObject {
     func threadStatus(_ key: String) -> JournalThreadStatus { workflow.threads[key]?.status ?? .active }
     func setThreadStatus(_ status: JournalThreadStatus, for key: String) {
         guard canManageWorkflow, !isAdvising else { return }
-        do { try mutateWorkflow { $0.threads[key] = JournalThreadState(status: status) } }
+        do {
+            try mutateWorkflow { $0.threads[key] = JournalThreadState(status: status) }
+            noticeMessage = l("AgentJournal 状态已设为“%@”；历史保留，原客户端会话未修改。", l(status.label))
+        }
         catch { errorMessage = error.localizedDescription }
     }
     func setFeedback(_ status: JournalFeedbackStatus, suggestion: JournalAgentSuggestion, result: JournalAgentResult) {

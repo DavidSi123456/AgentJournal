@@ -1,5 +1,104 @@
 import SwiftUI
 
+// macOS-only UX copy. The portable/Windows language table stays unchanged.
+struct JournalMacText {
+    let language: JournalInterfaceLanguage
+    init(_ language: JournalInterfaceLanguage) { self.language = language }
+    func callAsFunction(_ key: String, _ arguments: CVarArg...) -> String {
+        let format = language == .english ? Self.english[key] ?? JournalText.english[key] ?? key : key
+        return arguments.isEmpty ? format : String(format: format, locale: language.locale, arguments: arguments)
+    }
+    func message(_ value: String) -> String {
+        if language == .english, let translated = Self.english[value] { return translated }
+        return JournalText(language).message(value)
+    }
+    func category(_ value: String) -> String { self(value) }
+    func date(_ date: Date, clock: JournalClock, style: JournalDateStyle) -> String {
+        JournalText(language).date(date, clock: clock, style: style)
+    }
+    var weekdayItems: [JournalWeekday] { JournalText(language).weekdayItems }
+    static let english: [String: String] = [
+        "继续之前开启的自动草稿": "Continue previously enabled automatic drafts",
+        "你之前已允许自动草稿。读取后会按原设置继续生成；取消此选择可只读取本机记录。": "You previously enabled automatic drafts. After reading, generation continues with those settings. Turn this off to read local history only.",
+        "跳到读取确认": "Skip to reading consent",
+        "先看演示": "Start the demo tour",
+        "确认本机读取范围": "Confirm which local history to read",
+        "读取所选来源并开始": "Read selected sources and start",
+        "确认来源并返回日志": "Confirm sources and return to journal",
+        "返回演示": "Back to the demo",
+        "本机读取，不等于模型授权": "Local reading is not model consent",
+        "将读取本机所选来源的会话记录，并在本机建立索引。没有选择的来源不会扫描；不会读取云端独有或其他电脑的会话。": "Read conversation history from the selected sources on this Mac and build a local index. Unselected sources, cloud-only sessions and other computers are not scanned.",
+        "点击下方按钮后才开始读取。此步骤不发送对话、不调用模型，也不会开启自动草稿。": "Reading starts only after you click the button below. This step sends no conversations, calls no model and does not enable automatic drafts.",
+        "本次读取：%@": "Read from: %@",
+        "第一步：保存一条每日摘要": "First: save one daily summary",
+        "先补齐一条每日摘要": "Prepare one daily summary",
+        "先生成或编辑摘要": "Generate or edit a summary first",
+        "补齐缺少的摘要": "Prepare missing summaries",
+        "手动编辑摘要": "Write or edit a summary",
+        "生成这条摘要": "Generate this summary",
+        "返回继续": "Return and continue",
+        "选择一条记录，生成模型草稿或手动写一句进展。保存后再返回原界面继续；不会自动开始分析或批量补齐。": "Choose one entry, generate a model draft or write a short progress note yourself. Save it, then return to continue. No analysis or bulk generation starts automatically.",
+        "%d 条记录 · %d 条已保存摘要": "%d entries · %d saved summaries",
+        "尚无摘要": "No summary yet",
+        "已保存摘要，可以返回继续。": "Summary saved. You can return and continue.",
+        "请选择一条每日记录。": "Select a daily entry.",
+        "当前范围没有可编辑的记录，请返回调整日期或来源。": "No editable entries in this scope. Go back and change dates or sources.",
+        "仅这条记录的有限对话摘录会发送给所选 CLI；生成前会再次确认。手动编辑不调用模型。": "Only bounded excerpts from this entry are sent to the selected CLI, after another confirmation. Manual editing calls no model.",
+        "原始摘录已不在本机，可手动补充摘要。": "Original excerpts are no longer available locally. Write a summary manually.",
+        "已编辑或确认的笔记不会被模型覆盖；如需调整，请手动编辑。": "Edited or confirmed notes are protected. Edit them manually to make changes.",
+        "已有当前模型草稿，可手动核对；不会为相同记录重复调用模型。": "A current draft already exists. Review it manually; no duplicate model request is needed.",
+        "演示模式不调用模型，可以手动编辑示例。": "Demo mode calls no models. You can edit the synthetic entry manually.",
+        "当前候选没有可用摘要。先生成或编辑一条每日摘要，再分析；本次未调用模型。": "No usable summary in the current candidates. Save a daily summary before analyzing; no model was called.",
+        "当前可分析：%d / %d 个候选线程有摘要": "Ready to analyze: %d / %d candidate threads have summaries",
+        "零摘要不会调用模型": "No summaries, no model call",
+        "当前没有可分析的线程": "No threads are eligible for advice",
+        "先读取所选来源的本机记录，或将线程设为进行中／等待中。已搁置和已完成线程的历史仍保留。": "Read local history from the selected sources, or mark a thread active/waiting. Paused and completed threads retain their history.",
+        "选择一条记录保存摘要，再返回这里分析；手动编辑不消耗模型额度。": "Save a summary for one entry, then return to analyze. Manual editing uses no model credits.",
+        "只有一个线程有摘要：可核对它的下一步，不能比较多个线程的优先顺序。": "Only one thread has a summary: its next step can be reviewed, but multiple threads cannot be compared.",
+        "部分候选缺少摘要，建议只代表已提供的有限进展。": "Some candidates lack summaries. Advice reflects only the bounded progress supplied.",
+        "正在准备本次分析": "Preparing this analysis",
+        "正在等待 CLI 返回分析结果": "Waiting for the CLI analysis result",
+        "正在核对结果与摘要依据": "Checking the result against summary evidence",
+        "正在保存建议和每日历史": "Saving advice and daily history",
+        "已等待 %d 秒 · 可随时停止": "Elapsed: %d seconds · Stop at any time",
+        "模型响应时间取决于所选 CLI、模型和网络；这里不显示虚构进度百分比。": "Response time depends on the selected CLI, model and network. No guessed progress percentage is shown.",
+        "分析正在进行，完成后会显示结果。历史建议仍可回看，不代表本次分析已完成。": "Analysis is running; its result appears when finished. Historical advice remains available and is not the new result.",
+        "工作方式与数据范围": "How it works and data scope",
+        "查看补齐路径": "Prepare a summary",
+        "核对或补齐当前摘要": "Review or prepare current summaries",
+        "任务树还未建立": "No task tree yet",
+        "自动草拟需要至少一条已保存摘要；也可以不调用模型，手动建立第一项任务。": "Automatic drafting needs at least one saved summary. Or create your first task manually without a model call.",
+        "已有摘要，可自动草拟，也可手动建立任务。完成项始终需要人工确认。": "Saved summaries are available. Draft a tree or create tasks manually; completion always needs human confirmation.",
+        "手动新增第一项": "Add the first task manually",
+        "从现有摘要草拟任务树": "Draft a tree from saved summaries",
+        "草拟与进度规则": "Drafting and progress rules",
+        "依据与覆盖详情": "Evidence and coverage details",
+        "这段时间还没有摘要": "No summaries in this period yet",
+        "期间回顾已经可用，但需要先保存每日摘要。先补一条，再回来生成；不会自动批量调用模型。": "Period reviews are available, but need saved daily summaries first. Prepare one, then return to generate a review. No bulk model requests start automatically.",
+        "这段时间没有记录": "No entries in this period",
+        "请选择有记录的日期范围；已有历史回顾仍可查看。": "Choose dates with entries. Saved historical reviews remain available.",
+        "本日记录 · 仅这一天": "Daily entries · This date only",
+        "跨天线程总览": "Threads across dates",
+        "%@ — %@ · %d 个记录日": "%@ — %@ · %d days with entries",
+        "每个线程只列一张卡片；右侧串起它在不同日期的记录。": "One card per thread; the right-hand timeline shows its entries across dates.",
+        "当前筛选没有线程": "No threads match these filters",
+        "推进状态": "Journal status",
+        "全部状态": "All statuses",
+        "状态只影响 AgentJournal，不会关闭或归档原客户端会话。": "This status applies only to AgentJournal. It does not close or archive the source session.",
+        "进行中：参与推进分析。等待中：保留等待条件，可核对进展。暂时搁置／已完成：不参与推进分析，历史仍保留。": "Active: eligible for advice. Waiting: retain waiting conditions and review progress. Paused/completed: excluded from advice; history is retained.",
+        "AgentJournal 状态已设为“%@”；历史保留，原客户端会话未修改。": "AgentJournal status is now “%@”. History is retained; the source session is unchanged.",
+        "分支与同名线程": "Branches and same-name threads",
+        "目前按独立会话 ID 保留线程。同名或带编号不代表已确认的 fork 关系，不能直接合并；父子关联仍待可靠元数据支持。": "Threads retain their independent session IDs. A shared title or numbered suffix does not prove a fork relationship. Parent/branch links need reliable metadata; contents are not merged.",
+        "请求引擎：%@ CLI": "Request engine: %@ CLI",
+        "请求模型：%@": "Requested model: %@",
+        "CLI 默认（实际模型将在返回后报告）": "CLI default (actual model reported after the response)",
+        "使用你在这台 Mac 上的 CLI 登录／配置，不是开发者账户。额度和费用归属该 CLI 当前账户及其配置的提供方；AgentJournal 不提供免费模型额度，也无法预报具体费用。": "Uses the CLI login/configuration on your Mac, not a developer account. Usage and charges belong to that CLI's current account and configured provider. AgentJournal supplies no free model credits and cannot predict the exact cost.",
+        "本地调用上限不是供应商剩余额度或账单。": "Local request limits are not provider credits or billing.",
+        "先选一条记录开始": "Start with one entry",
+        "记录已读入。先保存一条摘要，再建立任务树、生成回顾或获得推进建议。": "History is loaded. Save one summary first, then build a task tree, generate a review or request advice."
+    ]
+}
+
 enum JournalTourTarget: Hashable {
     case calendar, daily, timeline, models, advisor, sharing, reports, management
 }
@@ -70,12 +169,14 @@ struct JournalOnboardingView: View {
     @State private var demoStore: JournalStore
     @State private var step: JournalTourStep = .welcome
     @State private var error: String?
-    private var l: JournalText { JournalText(choices.uiLanguage) }
+    @State private var resumeAutomatic: Bool
+    private var l: JournalMacText { JournalMacText(choices.uiLanguage) }
 
     init(store: JournalStore, firstLaunch: Bool) {
         self.store = store
         self.firstLaunch = firstLaunch
         _choices = State(initialValue: store.settings)
+        _resumeAutomatic = State(initialValue: store.autoSummarize)
         _demoStore = State(initialValue: Self.makeDemo(store.settings))
     }
     static func makeDemo(_ choices: JournalSettings) -> JournalStore {
@@ -95,13 +196,21 @@ struct JournalOnboardingView: View {
                 Text("AgentJournal").foregroundStyle(.secondary)
                 Spacer()
                 Text(l("演示 · 不读取私人记录")).font(.caption).foregroundStyle(JournalPalette.purple)
-                Button(l(firstLaunch ? "跳过指引" : "退出指引")) {
-                    if firstLaunch { complete() } else { dismiss() }
+                Button(l(firstLaunch ? "跳到读取确认" : "退出指引")) {
+                    if firstLaunch { step = .finish } else { dismiss() }
                 }.disabled(store.isLoading || store.isModelBusy)
             }.padding(.horizontal, 22).padding(.vertical, 14)
             Divider()
-            JournalView(store: demoStore, embeddedDemo: true)
+            if step == .welcome {
+                welcome.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .windowBackgroundColor))
+            } else if step == .finish {
+                finishCard.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .windowBackgroundColor))
+            } else {
+                JournalView(store: demoStore, embeddedDemo: true)
                 .id(ObjectIdentifier(demoStore))
+                .disabled(true)
                 .allowsHitTesting(false)
                 .overlayPreferenceValue(JournalTourAnchors.self) { anchors in
                     GeometryReader { geometry in
@@ -118,11 +227,9 @@ struct JournalOnboardingView: View {
                         }
                     }.allowsHitTesting(false)
                 }
-                .overlay {
-                    if step == .welcome { welcome }
-                    else if step == .finish { finishCard }
-                }
+            }
             Divider()
+            if step.target != nil {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text(l(step.title)).font(.headline)
@@ -144,6 +251,7 @@ struct JournalOnboardingView: View {
                         .disabled(store.isLoading || store.isModelBusy || !store.canEdit)
                 }
             }.padding(20)
+            }
         }.frame(width: 1220, height: 780).tint(JournalPalette.purple)
             .environment(\.locale, choices.uiLanguage.locale)
             .interactiveDismissDisabled(firstLaunch)
@@ -171,25 +279,60 @@ struct JournalOnboardingView: View {
                 .font(.caption).foregroundStyle(JournalPalette.purple)
             Text(l("这是一段安全演示，不会开启自动草稿。生成真实总结时，仍会单独征求允许并说明额度使用。"))
                 .font(.caption).foregroundStyle(.secondary)
-        }.padding(26).frame(width: 610).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            HStack {
+                Button(l("跳到读取确认")) { step = .finish }
+                Spacer()
+                Button(l("先看演示")) { change(1) }
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+            }
+        }.padding(26).frame(width: 650).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 18))
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(JournalPalette.purple.opacity(0.25)))
             .shadow(color: .black.opacity(0.15), radius: 25)
     }
     private var finishCard: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Label(l("准备好了"), systemImage: "checkmark.seal.fill").font(.title2.bold()).foregroundStyle(JournalPalette.green)
+            Label(l("确认本机读取范围"), systemImage: "externaldrive.badge.checkmark").font(.title2.bold()).foregroundStyle(JournalPalette.green)
+            Picker(l("你使用哪些工具？"), selection: $choices.sourceSelection) {
+                ForEach(JournalSourceSelection.allCases) { Text(l($0.label)).tag($0) }
+            }
+            Label(l("本机读取，不等于模型授权"), systemImage: "lock.shield").font(.headline)
+            Text(l("将读取本机所选来源的会话记录，并在本机建立索引。没有选择的来源不会扫描；不会读取云端独有或其他电脑的会话。"))
+                .font(.callout).fixedSize(horizontal: false, vertical: true)
+            Text(l("本次读取：%@", l(choices.sourceSelection.label))).font(.callout.bold()).foregroundStyle(JournalPalette.purple)
+            if store.autoSummarize {
+                Toggle(l("继续之前开启的自动草稿"), isOn: $resumeAutomatic)
+                if resumeAutomatic {
+                    Text(l("你之前已允许自动草稿。读取后会按原设置继续生成；取消此选择可只读取本机记录。"))
+                        .font(.callout).fixedSize(horizontal: false, vertical: true)
+                    Text(store.modelAccountNotice(for: choices)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if !resumeAutomatic {
+                Text(l("点击下方按钮后才开始读取。此步骤不发送对话、不调用模型，也不会开启自动草稿。"))
+                    .font(.callout).fixedSize(horizontal: false, vertical: true)
+            }
             Text(l("演示结束后，示例不会混入你的真实日志。"))
-            Text(l("从右上角的问号菜单可再次打开新手指引或体验演示。"))
-            Text(l("现阶段安装包面向 Apple Silicon、macOS 14 及以上；仍是未公证的 Beta，其他系统与机器需要额外验证。"))
                 .font(.caption).foregroundStyle(.secondary)
-        }.padding(28).frame(width: 580).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+            if let error { Text(l.message(error)).foregroundStyle(.orange) }
+            HStack {
+                Button(l("返回演示")) { step = .welcome }
+                Spacer()
+                Button(l(firstLaunch ? "读取所选来源并开始" : "确认来源并返回日志")) { complete() }
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    .disabled(store.isLoading || store.isModelBusy || !store.canEdit)
+            }
+        }.padding(28).frame(width: 690).background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 18))
             .shadow(color: .black.opacity(0.15), radius: 25)
     }
     private func change(_ delta: Int) {
         if let next = JournalTourStep(rawValue: step.rawValue + delta) { step = next }
     }
     private func complete() {
-        do { try store.completeOnboarding(choices); dismiss() }
+        do {
+            try store.completeOnboarding(choices)
+            if store.autoSummarize && !resumeAutomatic { store.autoSummarize = false }
+            dismiss()
+        }
         catch { self.error = error.localizedDescription }
     }
 }
