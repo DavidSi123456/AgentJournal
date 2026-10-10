@@ -88,6 +88,14 @@ struct CheckRunner {
         }
         let suite = JournalTests()
         let tests: [(String, () async throws -> Void)] = [
+            ("testMacProjectsGroupFullFoldersAcrossProvidersAndDays", { try suite.testMacProjectsGroupFullFoldersAcrossProvidersAndDays() }),
+            ("testMacProjectsKeepSameNamesSubfoldersAndUnknownPathsSeparate", { try suite.testMacProjectsKeepSameNamesSubfoldersAndUnknownPathsSeparate() }),
+            ("testMacProjectsUseLatestFolderWithoutDuplicatingThreadHistory", { try suite.testMacProjectsUseLatestFolderWithoutDuplicatingThreadHistory() }),
+            ("testMacProjectProjectionIsDeterministicAndRespectsFilteredInput", { try suite.testMacProjectProjectionIsDeterministicAndRespectsFilteredInput() }),
+            ("testMacCombinedProjectTimelineGroupsDaysWithoutLosingAttribution", { try suite.testMacCombinedProjectTimelineGroupsDaysWithoutLosingAttribution() }),
+            ("testMacCombinedProjectSelectionRepairsAfterFilteringAndEmptyResults", { try suite.testMacCombinedProjectSelectionRepairsAfterFilteringAndEmptyResults() }),
+            ("testMacProjectGroupingNeverChangesNotesPlansOrModelInputs", { try await suite.testMacProjectGroupingNeverChangesNotesPlansOrModelInputs() }),
+            ("testMacProjectCopyIsBilingual", { try suite.testMacProjectCopyIsBilingual() }),
             ("testMacFirstSummaryUnlocksAdviceWithoutEmptyCalls", { try await suite.testMacFirstSummaryUnlocksAdviceWithoutEmptyCalls() }),
             ("testMacManualSummaryIsCurrentWithoutCallsOrConfirmation", { try await suite.testMacManualSummaryIsCurrentWithoutCallsOrConfirmation() }),
             ("testMacAdvicePrefersUsableNotesBeforeFortyThreadLimit", { try await suite.testMacAdvicePrefersUsableNotesBeforeFortyThreadLimit() }),

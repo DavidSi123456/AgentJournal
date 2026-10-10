@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.3 — macOS project/folder grouping (not yet tagged)
+
+- Add an optional “By project” browsing mode. Group threads across dates and providers by their full working-folder path. The “Combine into one card” switch is off by default, keeping expandable original-thread cards. Turn it on for one integrated project card with attributed existing notes and a project-wide timeline grouped by day. Original-thread editing, task trees and navigation stay accessible through a menu.
+- Keep same-named folders in different locations and subfolders separate. Threads without an absolute folder path remain separate; a thread that changes folders uses its latest matching entry's folder and retains its earlier daily records without duplication. Grouping is lexical and does not inspect folders, discover Git roots or resolve symlinks.
+- Apply the existing source/category/status/search/project-exclusion filters before grouping. Grouping does not merge source sessions, alter notes/task trees/advice, or add model requests. Windows and portable core are unchanged.
+- Add eight synthetic macOS checks for cross-provider grouping, full-path isolation, missing folders, moving threads, deterministic filtered projections, daily timeline attribution, project selection repair, read-only behavior and bilingual copy.
+
 ## 0.6.2 — macOS first-summary workflow (not yet tagged)
 
 - Give the welcome and reading-consent steps opaque, independent pages with nearby actions. Skipping the demo now opens the source-consent step instead of starting a private scan. Previously enabled automatic drafts are disclosed and can be turned off before reading.

@@ -2,6 +2,76 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+// A macOS-only, read-only projection. Session IDs, notes and model inputs are
+// untouched. A thread belongs to its latest matching record's working directory.
+struct JournalProjectGroup: Identifiable {
+    let id: String
+    let directory: String?
+    let threads: [JournalActivity]
+    let records: [JournalActivity]
+    var title: String { directory.map { URL(fileURLWithPath: $0).lastPathComponent } ?? threads.first?.title ?? "" }
+    var days: [String] { Set(records.map(\.day)).sorted() }
+    var timeline: [JournalProjectDay] {
+        Dictionary(grouping: records, by: \.day).map { day, entries in
+            JournalProjectDay(day: day, records: entries.sorted(by: Self.recentFirst))
+        }.sorted { $0.day > $1.day }
+    }
+
+    static func selectedID(_ id: String?, preferredThread: String?, in groups: [Self]) -> String? {
+        if let id, groups.contains(where: { $0.id == id }) { return id }
+        return groups.first(where: { $0.contains(preferredThread) })?.id ?? groups.first?.id
+    }
+
+    static func directoryKey(_ cwd: String) -> String? {
+        // Never expand a relative path against the app's cwd, inspect the disk,
+        // infer a Git root, resolve symlinks or merge same-named folders.
+        guard cwd.hasPrefix("/"), !cwd.contains("\0") else { return nil }
+        var parts: [Substring] = []
+        for part in cwd.split(separator: "/") {
+            if part == "." { continue }
+            if part == ".." { if !parts.isEmpty { parts.removeLast() } }
+            else { parts.append(part) }
+        }
+        return "/" + parts.joined(separator: "/")
+    }
+    static func recentFirst(_ left: JournalActivity, _ right: JournalActivity) -> Bool {
+        if left.lastActivity != right.lastActivity { return left.lastActivity > right.lastActivity }
+        if left.id != right.id { return left.id < right.id }
+        return left.cwd < right.cwd
+    }
+    static func latestThreads(in records: [JournalActivity]) -> [JournalActivity] {
+        var seen = Set<String>()
+        return records.sorted(by: recentFirst).filter { seen.insert($0.threadKey).inserted }
+    }
+    static func build(from input: [JournalActivity]) -> [Self] {
+        var seen = Set<String>()
+        let records = input.sorted(by: recentFirst).filter { seen.insert($0.id).inserted }
+        let byThread = Dictionary(grouping: records, by: \.threadKey)
+        let byDirectory = Dictionary(grouping: latestThreads(in: records)) { thread in
+            directoryKey(thread.cwd).map { "directory:\($0)" } ?? "thread:\(thread.threadKey)"
+        }
+        return byDirectory.map { key, members in
+            let threads = members.sorted(by: recentFirst)
+            return Self(id: key, directory: directoryKey(threads[0].cwd), threads: threads,
+                records: threads.flatMap { byThread[$0.threadKey] ?? [] }.sorted(by: recentFirst))
+        }.sorted {
+            if $0.threads[0].lastActivity != $1.threads[0].lastActivity {
+                return $0.threads[0].lastActivity > $1.threads[0].lastActivity
+            }
+            return $0.id < $1.id
+        }
+    }
+    func contains(_ threadKey: String?) -> Bool {
+        threads.contains { $0.threadKey == threadKey }
+    }
+}
+
+struct JournalProjectDay: Identifiable {
+    let day: String
+    let records: [JournalActivity]
+    var id: String { day }
+}
+
 public struct JournalView: View {
     @ObservedObject private var store: JournalStore
     @State private var selectedDate: Date
@@ -12,6 +82,9 @@ public struct JournalView: View {
     @State private var category = "全部"
     @State private var statusFilter = "all"
     @State private var viewMode = "day"
+    @State private var combineProjectThreads = false
+    @State private var selectedProjectID: String?
+    @State private var expandedProjectIDs = Set<String>()
     @State private var editing: JournalActivity?
     @State private var showingSettings = false
     @State private var showingShare = false
@@ -42,7 +115,8 @@ public struct JournalView: View {
     private var filtered: [JournalActivity] {
         store.activities.filter { activity in
             let draft = store.draft(for: activity)
-            return store.settings.includesProvider(activity.source) && (sourceFilter == "all" || activity.source.rawValue == sourceFilter)
+            return store.settings.includesProvider(activity.source) && store.settings.includesProject(activity.cwd)
+                && (sourceFilter == "all" || activity.source.rawValue == sourceFilter)
                 && (category == "全部" || draft.category == category)
                 && (statusFilter == "all" || store.threadStatus(activity.threadKey).rawValue == statusFilter)
                 && (search.isEmpty || (activity.title + draft.displaySummary + activity.cwd)
@@ -54,9 +128,11 @@ public struct JournalView: View {
         return filtered.filter { $0.day == day }.sorted { $0.lastActivity > $1.lastActivity }
     }
     private var threadItems: [JournalActivity] {
-        var seen = Set<String>()
-        return filtered.sorted { $0.lastActivity > $1.lastActivity }.filter { seen.insert($0.threadKey).inserted }
+        JournalProjectGroup.latestThreads(in: filtered)
     }
+    private var projectGroups: [JournalProjectGroup] { JournalProjectGroup.build(from: filtered) }
+    private var isCombinedProject: Bool { viewMode == "project" && combineProjectThreads }
+    private var selectedProject: JournalProjectGroup? { projectGroups.first { $0.id == selectedProjectID } }
     private var listItems: [JournalActivity] { viewMode == "day" ? dayItems : threadItems }
     private var history: [JournalActivity] { selectedThreadKey.map { store.history(for: $0) } ?? [] }
     private var purple: Color { JournalPalette.purple }
@@ -75,7 +151,9 @@ public struct JournalView: View {
             HSplitView {
                 sidebar.frame(minWidth: 228, idealWidth: 244, maxWidth: 270).journalTourTarget(.calendar)
                 dailyPanel.frame(minWidth: 400, idealWidth: 490, maxWidth: .infinity).journalTourTarget(.daily)
-                threadPanel.frame(minWidth: 370, idealWidth: 490, maxWidth: .infinity).journalTourTarget(.timeline)
+                Group {
+                    if isCombinedProject { projectPanel } else { threadPanel }
+                }.frame(minWidth: 370, idealWidth: 490, maxWidth: .infinity).journalTourTarget(.timeline)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -121,13 +199,30 @@ public struct JournalView: View {
             }
         }
         .onChange(of: store.lastRefreshed) { _, _ in selectFirstIfNeeded() }
-        .onChange(of: selectedThreadKey) { _, key in store.followThread(key) }
+        .onChange(of: selectedThreadKey) { _, key in
+            if !isCombinedProject { store.followThread(key); revealSelectedProject() }
+        }
         .onChange(of: sourceFilter) { _, _ in selectFirstIfNeeded() }
         .onChange(of: category) { _, _ in selectFirstIfNeeded() }
         .onChange(of: statusFilter) { _, _ in selectFirstIfNeeded() }
         .onChange(of: listItems.map(\.id)) { _, _ in selectFirstIfNeeded() }
         .onChange(of: search) { _, _ in selectFirstIfNeeded() }
-        .onChange(of: viewMode) { _, _ in selectFirstIfNeeded() }
+        .onChange(of: viewMode) { _, _ in
+            if isCombinedProject {
+                selectedProjectID = JournalProjectGroup.selectedID(nil, preferredThread: selectedThreadKey, in: projectGroups)
+            }
+            selectFirstIfNeeded()
+            store.followThread(isCombinedProject ? nil : selectedThreadKey)
+        }
+        .onChange(of: combineProjectThreads) { _, combined in
+            if combined {
+                selectedProjectID = JournalProjectGroup.selectedID(nil, preferredThread: selectedThreadKey, in: projectGroups)
+            } else if let group = selectedProject, !group.contains(selectedThreadKey) {
+                selectedThreadKey = group.threads.first?.threadKey
+            }
+            selectFirstIfNeeded()
+            store.followThread(isCombinedProject ? nil : selectedThreadKey)
+        }
         .onChange(of: store.settingsRequest) { _, _ in if !showingOnboarding { showingSettings = true } }
         .onChange(of: store.settings) { old, new in
             if old.sourceSelection != new.sourceSelection { selectFirstIfNeeded() }
@@ -318,26 +413,31 @@ public struct JournalView: View {
     }
 
     private var dailyPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let groups = viewMode == "project" ? projectGroups : []
+        return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(viewMode == "day" ? l.date(selectedDate, clock: store.clock, style: .dayWithWeekday) : l("跨天线程总览"))
+                        Text(viewMode == "day" ? l.date(selectedDate, clock: store.clock, style: .dayWithWeekday)
+                            : l(viewMode == "project" ? "跨天项目总览" : "跨天线程总览"))
                             .font(.title2.weight(.bold))
-                        Text(l(viewMode == "day" ? "本日记录 · 仅这一天" : "每个线程只列一张卡片；右侧串起它在不同日期的记录。"))
+                        Text(l(viewMode == "day" ? "本日记录 · 仅这一天" : viewMode == "project"
+                            ? (combineProjectThreads ? "一个项目一张卡片；右侧汇总每天的进展。" : "相同工作目录归为一个项目；展开后选择原线程。")
+                            : "每个线程只列一张卡片；右侧串起它在不同日期的记录。"))
                             .font(.subheadline).foregroundStyle(.secondary)
-                        if viewMode == "thread", let first = filtered.map(\.day).min(), let last = filtered.map(\.day).max() {
+                        if viewMode != "day", let first = filtered.map(\.day).min(), let last = filtered.map(\.day).max() {
                             Text(l("%@ — %@ · %d 个记录日", first, last, Set(filtered.map(\.day)).count))
                                 .font(.caption).foregroundStyle(purple)
                         }
                     }
                     Spacer()
-                    Picker(l("浏览方式"), selection: $viewMode) {
-                        Text(l("按天")).tag("day"); Text(l("按线程")).tag("thread")
-                    }.pickerStyle(.segmented).labelsHidden().frame(width: store.settings.uiLanguage == .english ? 180 : 132)
                 }
+                Picker(l("浏览方式"), selection: $viewMode) {
+                    Text(l("按天")).tag("day"); Text(l("按线程")).tag("thread"); Text(l("按项目")).tag("project")
+                }.pickerStyle(.segmented).labelsHidden().accessibilityLabel(l("浏览方式"))
                 HStack(spacing: 9) {
-                    badge(l("%d 个线程", listItems.count), color: purple)
+                    badge(viewMode == "project" ? l("%d 组 · %d 个线程", groups.count, listItems.count)
+                        : l("%d 个线程", listItems.count), color: purple)
                     badge("\(listItems.filter { $0.source == .codex }.count) Codex", color: JournalPalette.blue)
                     badge("\(listItems.filter { $0.source == .claude }.count) CC", color: JournalPalette.orange)
                     Spacer()
@@ -345,7 +445,7 @@ public struct JournalView: View {
                         Button { showingAgent = true } label: { Label(l("当天推进建议"), systemImage: "sparkles") }
                             .foregroundStyle(JournalPalette.green).tint(JournalPalette.green)
                     }
-                    Button { export(listItems, title: viewMode == "day" ? store.clock.key(selectedDate) : l("全部线程")) } label: {
+                    Button { export(listItems, title: viewMode == "day" ? store.clock.key(selectedDate) : l(viewMode == "project" ? "全部项目的线程" : "全部线程")) } label: {
                         Image(systemName: "square.and.arrow.up")
                     }.help(l("导出当前摘要为 Markdown")).disabled(listItems.isEmpty)
                 }
@@ -364,6 +464,15 @@ public struct JournalView: View {
                     Text(l("全部状态")).tag("all")
                     ForEach(JournalThreadStatus.allCases, id: \.self) { Text(l($0.label)).tag($0.rawValue) }
                 }.frame(maxWidth: 260, alignment: .leading)
+                if viewMode == "project" {
+                    Toggle(l("合并为一张卡片"), isOn: $combineProjectThreads)
+                        .toggleStyle(.switch)
+                        .help(l("默认关闭。开启后整合已有摘要，不额外调用模型，也不合并原会话。"))
+                    DisclosureGroup(l("项目如何分组？")) {
+                        Text(l("按完整工作目录分组，Codex 与 CC 可在同一组。子文件夹分别显示；无目录的线程单独保留。线程换目录时按最新匹配记录归组，不复制记录。不改变原会话、摘要、任务树或推进分析。"))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.font(.callout).foregroundStyle(.secondary)
+                }
                 if viewMode == "thread" {
                     DisclosureGroup(l("分支与同名线程")) {
                         Text(l("目前按独立会话 ID 保留线程。同名或带编号不代表已确认的 fork 关系，不能直接合并；父子关联仍待可靠元数据支持。"))
@@ -385,6 +494,11 @@ public struct JournalView: View {
                 LazyVStack(spacing: 13) {
                     if listItems.isEmpty {
                         emptyState(l(viewMode == "day" ? "这一天，留一点空白" : "当前筛选没有线程"), detail: l("没有符合条件的线程。\n可以选择有记录的日期，或切换到“按线程”。"), icon: "sparkles")
+                    } else if viewMode == "project" {
+                        ForEach(groups) { group in
+                            if combineProjectThreads { combinedProjectCard(group) }
+                            else { projectCard(group) }
+                        }
                     } else { ForEach(listItems) { activityCard($0) } }
                 }.padding(18)
             }
@@ -401,6 +515,202 @@ public struct JournalView: View {
                 }
             }.padding(14).background(purple.opacity(0.045))
         }.background(purple.opacity(0.025))
+    }
+
+    private func projectCard(_ group: JournalProjectGroup) -> some View {
+        let expanded = expandedProjectIDs.contains(group.id)
+        let days = group.days
+        return VStack(alignment: .leading, spacing: 12) {
+            Button {
+                if expanded { expandedProjectIDs.remove(group.id) }
+                else {
+                    expandedProjectIDs.insert(group.id)
+                    if !group.contains(selectedThreadKey) { selectedThreadKey = group.threads.first?.threadKey }
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right").frame(width: 12)
+                        Image(systemName: group.directory == nil ? "folder" : "folder.fill").foregroundStyle(purple)
+                        Text(group.title).font(.headline).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Text(group.directory ?? l("未记录完整目录 · 此线程单独展示"))
+                        .font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        .help(group.directory ?? l("未记录完整目录 · 此线程单独展示"))
+                    HStack(spacing: 8) {
+                        badge(l("%d 个线程", group.threads.count), color: purple)
+                        if group.threads.contains(where: { $0.source == .codex }) {
+                            badge("\(group.threads.filter { $0.source == .codex }.count) Codex", color: JournalPalette.blue)
+                        }
+                        if group.threads.contains(where: { $0.source == .claude }) {
+                            badge("\(group.threads.filter { $0.source == .claude }.count) CC", color: JournalPalette.orange)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    Text(l("%d 条每日记录 · %d 个记录日", group.records.count, days.count))
+                        .font(.callout).foregroundStyle(.secondary)
+                    if let first = days.first, let last = days.last {
+                        Text("\(first) — \(last)").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .accessibilityLabel(l("%@，%d 个线程", group.title, group.threads.count))
+                .accessibilityValue(l(expanded ? "已展开" : "已收起"))
+                .help(l("展开项目，选择线程查看时间线；不会合并原会话。"))
+            if expanded {
+                LazyVStack(spacing: 12) { ForEach(group.threads) { activityCard($0) } }
+            }
+        }.padding(14).background(purple.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(purple.opacity(0.18)))
+    }
+
+    private func combinedProjectCard(_ group: JournalProjectGroup) -> some View {
+        let selected = selectedProjectID == group.id
+        return VStack(alignment: .leading, spacing: 14) {
+            Button { selectedProjectID = group.id } label: {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(group.title, systemImage: "folder.fill")
+                        .font(.headline).foregroundStyle(purple)
+                    Text(group.directory ?? l("未记录完整目录 · 此线程单独展示"))
+                        .font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        .help(group.directory ?? "")
+                    HStack(spacing: 8) {
+                        badge(l("%d 个线程", group.threads.count), color: purple)
+                        if group.threads.contains(where: { $0.source == .codex }) {
+                            badge("\(group.threads.filter { $0.source == .codex }.count) Codex", color: JournalPalette.blue)
+                        }
+                        if group.threads.contains(where: { $0.source == .claude }) {
+                            badge("\(group.threads.filter { $0.source == .claude }.count) CC", color: JournalPalette.orange)
+                        }
+                    }
+                    Text(l("%d 条每日记录 · %d 个记录日", group.records.count, group.days.count))
+                        .font(.caption).foregroundStyle(.secondary)
+                    Divider()
+                    Text(l("最新进展")).font(.subheadline.weight(.semibold))
+                    // Flat attributed paragraphs, not nested thread cards. Existing
+                    // notes remain independently editable in the daily timeline.
+                    ForEach(group.threads) { activity in
+                        projectNote(activity, includeDate: true)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .accessibilityLabel(l("%@，%d 个线程", group.title, group.threads.count))
+                .accessibilityValue(l(selected ? "已选中项目" : "未选中项目"))
+                .help(l("选择项目，查看所有线程的每日进展。"))
+            HStack {
+                originalThreadsMenu(group)
+                Spacer()
+                Button { export(group.records, title: group.title) } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }.help(l("导出项目摘要"))
+            }.font(.caption).buttonStyle(.borderless)
+        }.padding(16)
+            .background(purple.opacity(selected ? 0.09 : 0.035), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(purple.opacity(selected ? 0.55 : 0.18), lineWidth: selected ? 1.5 : 1))
+    }
+
+    private func projectNote(_ activity: JournalActivity, includeDate: Bool) -> some View {
+        let draft = store.draft(for: activity)
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(activity.source == .codex ? "Codex" : "CC")
+                    .font(.caption.weight(.semibold)).foregroundStyle(JournalPalette.source(activity.source))
+                Text(activity.title).font(.caption.weight(.medium)).lineLimit(2)
+                Spacer(minLength: 0)
+                if draft.isConfirmed { Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.green) }
+            }
+            if includeDate { Text(activity.day).font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
+            Text(draft.displaySummary.isEmpty
+                ? l("这一天有 %d 条对话，尚未生成草稿。", activity.messageCount) : draft.displaySummary)
+                .font(.subheadline).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !draft.displayNextStep.isEmpty {
+                Text(l("后续：%@", draft.displayNextStep)).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func originalThreadsMenu(_ group: JournalProjectGroup) -> some View {
+        Menu {
+            ForEach(group.threads) { activity in
+                Menu("\(activity.source == .codex ? "Codex" : "CC") · \(activity.title)") {
+                    Button(l("查看原线程时间线")) { showOriginalThread(activity) }
+                    Button(l("编辑最新摘要")) { editing = activity }.disabled(!store.canEdit)
+                    Button(l("任务树与每日进度")) { progressActivity = activity }.disabled(!store.canEdit)
+                    JournalOpenThreadButton(activity: activity, language: store.settings.uiLanguage, disabled: store.isDemo)
+                    Button(l("复制继续命令")) { copyResume(activity) }
+                }
+            }
+        } label: {
+            Label(l("原线程（%d）", group.threads.count), systemImage: "list.bullet")
+        }.menuStyle(.borderlessButton).fixedSize()
+    }
+
+    private var projectPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                Label(l("项目的每一天"), systemImage: "clock.arrow.circlepath")
+                    .font(.headline).foregroundStyle(purple)
+                if let group = selectedProject {
+                    Text(group.title).font(.title3.weight(.semibold)).lineLimit(3)
+                    Text(group.directory ?? l("未记录完整目录 · 此线程单独展示"))
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        .help(group.directory ?? "")
+                    Text(l("%d 条每日记录 · %d 个记录日", group.records.count, group.days.count))
+                        .font(.callout).foregroundStyle(.secondary)
+                    Text(l("同一天的进展集中展示；每段摘要仍属于原线程，可单独编辑。"))
+                        .font(.callout).foregroundStyle(.secondary)
+                    HStack {
+                        originalThreadsMenu(group)
+                        Spacer()
+                        Button(l("导出项目摘要")) { export(group.records, title: group.title) }
+                    }.font(.caption).buttonStyle(.borderless)
+                } else { Text(l("选择左侧的项目卡片")).font(.subheadline).foregroundStyle(.secondary) }
+            }.padding(22)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if let group = selectedProject {
+                        ForEach(group.timeline) { projectTimelineRow($0) }
+                    } else {
+                        emptyState(l("进展，有迹可循"), detail: l("选择一个项目，在这里一起查看各线程每天的进展。"), icon: "folder")
+                    }
+                }.padding(22)
+            }
+        }.background(purple.opacity(0.035))
+    }
+
+    private func projectTimelineRow(_ day: JournalProjectDay) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(spacing: 0) {
+                Circle().fill(purple).frame(width: 10, height: 10).padding(.top, 6)
+                Rectangle().fill(purple.opacity(0.18)).frame(width: 1).frame(maxHeight: .infinity)
+            }
+            VStack(alignment: .leading, spacing: 14) {
+                Button { viewMode = "day"; choose(store.clock.date(day.day)) } label: {
+                    Text(l.date(store.clock.date(day.day), clock: store.clock, style: .fullDay))
+                        .font(.subheadline.weight(.semibold))
+                }.buttonStyle(.plain)
+                ForEach(day.records) { activity in
+                    VStack(alignment: .leading, spacing: 8) {
+                        projectNote(activity, includeDate: false).textSelection(.enabled)
+                        HStack {
+                            Button(l("查看原线程时间线")) { showOriginalThread(activity) }
+                            Spacer()
+                            Button(l("编辑")) { editing = activity }.disabled(!store.canEdit)
+                            JournalOpenThreadButton(activity: activity, language: store.settings.uiLanguage, disabled: store.isDemo, compact: true)
+                        }.font(.caption).buttonStyle(.borderless)
+                        if activity.id != day.records.last?.id { Divider() }
+                    }
+                }
+            }.padding(.bottom, 28)
+        }.fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func showOriginalThread(_ activity: JournalActivity) {
+        viewMode = "thread"
+        selectedThreadKey = activity.threadKey
     }
 
     private func activityCard(_ activity: JournalActivity) -> some View {
@@ -596,6 +906,13 @@ public struct JournalView: View {
         if selectedThreadKey == nil || !listItems.contains(where: { $0.threadKey == selectedThreadKey }) {
             selectedThreadKey = listItems.first?.threadKey
         }
+        selectedProjectID = JournalProjectGroup.selectedID(selectedProjectID, preferredThread: selectedThreadKey, in: projectGroups)
+        revealSelectedProject()
+    }
+    private func revealSelectedProject() {
+        guard viewMode == "project", !combineProjectThreads,
+              let group = projectGroups.first(where: { $0.contains(selectedThreadKey) }) else { return }
+        expandedProjectIDs.insert(group.id)
     }
     @State private var forceAfterConsent = false
     private func requestSummary(_ items: [JournalActivity], force: Bool = false) {

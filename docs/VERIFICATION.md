@@ -1,5 +1,16 @@
 # Local release-preparation verification
 
+## macOS project/folder grouping — 2026-10-10
+
+Version: **0.6.3, build 14**, with macOS-only changes based on `7ee1c62`. Windows, portable core, package manifests and packaging scripts are unchanged.
+
+- English and Chinese system-default test processes each passed **101 checks**, with **4 optional live checks skipped**. Eight new checks cover full-path grouping across providers/days, same-name and subfolder isolation, unknown paths, directory changes without duplicated history, deterministic filtered input, daily timeline attribution/order, project selection repair after filtering/empty results, read-only notes/plans/model inputs and bilingual copy.
+- Native English/Chinese synthetic previews verified that “Combine into one card” / “合并为一张卡片” starts **off** in “By project” / “按项目”. Turning it on replaced three independent thread cards (two Codex, one CC) with one attributed project card and a timeline of six daily entries grouped into three dates. Turning it off restored the thread cards. Chinese checks also verified CC-only counts/history, empty-search selection clearing/recovery, saving a synthetic note from the project timeline and finding it in its original CC timeline, and opening the original thread's task tree from the project menu. Both languages were visually rechecked after fixing long-note wrapping. Original-client navigation is deliberately disabled in the demo; no real session, model or personal journal was used.
+- The release ZIP passed arm64/minimum-macOS-14/layout, intact ad-hoc signature and bundled privacy checks. This is not Developer ID signing, Apple notarization or clean-Mac acceptance.
+- Grouping is a display-only projection by normalized full working-folder path, not a merged session, Git-root discovery, symlink resolution or project-level model analysis. The latest matching entry assigns a thread to one group; unknown/relative folders remain per-thread. Existing records, task trees, notes and advice retain their original identities.
+
+The installed `/Applications/AgentJournal.app` was replaced with **0.6.3, build 14** on 2026-10-10, preserving its bundle identifier and registering the same path with Launch Services. Installation used a clean extraction of the verified ZIP because the Desktop-hosted app copy had acquired Finder metadata. The installed app passed strict signature verification and executable comparison with that extraction. The previous **0.6.2, build 13** app is retained in an ignored local ZIP backup under `.build/AppBackups`; personal journal data and settings were not replaced. This remains an ad-hoc Beta, not a notarized release.
+
 ## macOS first-summary workflow — 2026-10-08
 
 Candidate: **0.6.2, build 13**, Apple Silicon/macOS 15.7.9. Only macOS UI/store, macOS tests, version metadata and documentation changed; Windows and portable core are unchanged.

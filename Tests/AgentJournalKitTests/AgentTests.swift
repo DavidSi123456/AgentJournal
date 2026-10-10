@@ -17,6 +17,140 @@ final class MockAgentAdvisor: JournalAgentAdvising {
 }
 
 extension JournalTests {
+    private func projectEntry(_ thread: String, folder: String, day: String = "2026-10-09",
+                              provider: JournalProvider = .codex, time: TimeInterval = 0) -> JournalActivity {
+        let stamp = JournalClock(timeZoneID: "UTC").date(day).addingTimeInterval(time)
+        return JournalActivity(provider: provider, threadID: thread, day: day, title: "Synthetic \(thread)",
+            cwd: folder, firstActivity: stamp, lastActivity: stamp, messageIDs: ["\(thread)-\(day)"])
+    }
+    func testMacProjectsGroupFullFoldersAcrossProvidersAndDays() throws {
+        let codex = projectEntry("shared-id", folder: "/demo/project/./", time: 120)
+        let old = projectEntry("shared-id", folder: "/demo/project", day: "2026-10-08")
+        let claude = projectEntry("shared-id", folder: "/demo/project", provider: .claude, time: 60)
+        let group = try XCTUnwrap(JournalProjectGroup.build(from: [old, codex, claude, old]).first)
+        XCTAssertEqual(JournalProjectGroup.build(from: [old, codex, claude]).count, 1)
+        XCTAssertEqual(group.directory, "/demo/project")
+        XCTAssertEqual(group.title, "project")
+        XCTAssertEqual(group.threads.map(\.threadKey), [codex.threadKey, claude.threadKey])
+        XCTAssertEqual(group.records.count, 3)
+        XCTAssertEqual(group.days, ["2026-10-08", "2026-10-09"])
+        XCTAssertTrue(group.contains(claude.threadKey))
+        XCTAssertFalse(group.contains(nil))
+    }
+    func testMacProjectsKeepSameNamesSubfoldersAndUnknownPathsSeparate() throws {
+        let rows = [
+            projectEntry("one", folder: "/demo/one/research"),
+            projectEntry("two", folder: "/demo/two/research"),
+            projectEntry("child", folder: "/demo/one/research/notes"),
+            projectEntry("case", folder: "/demo/one/Research"),
+            projectEntry("unknown-1", folder: ""),
+            projectEntry("unknown-2", folder: ""),
+            projectEntry("relative", folder: "research"),
+            projectEntry("tilde", folder: "~/research"),
+            projectEntry("root", folder: "/")
+        ]
+        let groups = JournalProjectGroup.build(from: rows)
+        XCTAssertEqual(groups.count, rows.count)
+        XCTAssertEqual(groups.filter { $0.directory == nil }.count, 4)
+        XCTAssertEqual(Set(groups.map(\.id)).count, rows.count)
+        XCTAssertEqual(JournalProjectGroup.directoryKey("/demo/project/../research/"), "/demo/research")
+        XCTAssertEqual(JournalProjectGroup.directoryKey("/demo/ folder "), "/demo/ folder ")
+        XCTAssertEqual(JournalProjectGroup.directoryKey("/../../"), "/")
+        XCTAssertNil(JournalProjectGroup.directoryKey("/demo/\0private"))
+        XCTAssertTrue(groups.allSatisfy { $0.threads.count == 1 })
+    }
+    func testMacProjectsUseLatestFolderWithoutDuplicatingThreadHistory() throws {
+        let before = projectEntry("moving", folder: "/demo/old", day: "2026-10-08")
+        let after = projectEntry("moving", folder: "/demo/new")
+        let peer = projectEntry("peer", folder: "/demo/new", time: 60)
+        let groups = JournalProjectGroup.build(from: [before, peer, after])
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.directory, "/demo/new")
+        XCTAssertEqual(groups.first?.threads.count, 2)
+        XCTAssertEqual(groups.first?.records.count, 3)
+        XCTAssertEqual(groups.first?.records.first(where: { $0.id == before.id })?.cwd, "/demo/old")
+        XCTAssertEqual(before.cwd, "/demo/old")
+        XCTAssertEqual(after.threadKey, before.threadKey)
+    }
+    func testMacProjectProjectionIsDeterministicAndRespectsFilteredInput() throws {
+        let rows = [projectEntry("b", folder: "/demo/b"), projectEntry("a", folder: "/demo/a"),
+                    projectEntry("c", folder: "/demo/a", provider: .claude)]
+        let groups = JournalProjectGroup.build(from: rows)
+        let reversed = JournalProjectGroup.build(from: Array(rows.reversed()))
+        XCTAssertEqual(groups.map(\.id), reversed.map(\.id))
+        XCTAssertEqual(groups.flatMap { $0.threads.map(\.id) }, reversed.flatMap { $0.threads.map(\.id) })
+        var scope = try XCTUnwrap(settings)
+        scope.excludedProjects = "/demo/b"
+        let filtered = rows.filter { $0.source == .codex && scope.includesProject($0.cwd) }
+        let visible = JournalProjectGroup.build(from: filtered)
+        XCTAssertEqual(visible.count, 1)
+        XCTAssertEqual(visible.first?.threads.map(\.threadKey), ["a"])
+        XCTAssertTrue(JournalProjectGroup.build(from: []).isEmpty)
+    }
+    func testMacCombinedProjectTimelineGroupsDaysWithoutLosingAttribution() throws {
+        let codex = projectEntry("shared", folder: "/demo/project", time: 60)
+        let claude = projectEntry("shared", folder: "/demo/project", provider: .claude, time: 120)
+        let older = projectEntry("shared", folder: "/demo/project", day: "2026-10-08")
+        let group = try XCTUnwrap(JournalProjectGroup.build(from: [older, codex, claude, older]).first)
+        XCTAssertEqual(group.timeline.map(\.id), ["2026-10-09", "2026-10-08"])
+        XCTAssertEqual(group.timeline.first?.records.map(\.id), [claude.id, codex.id])
+        XCTAssertEqual(group.timeline.flatMap(\.records).map(\.id), [claude.id, codex.id, older.id])
+        XCTAssertEqual(Set(group.timeline.flatMap(\.records).map(\.threadKey)), [codex.threadKey, claude.threadKey])
+        let reversed = try XCTUnwrap(JournalProjectGroup.build(from: [claude, codex, older]).first)
+        XCTAssertEqual(group.timeline.flatMap(\.records).map(\.id), reversed.timeline.flatMap(\.records).map(\.id))
+        let filtered = try XCTUnwrap(JournalProjectGroup.build(from: [codex, older]).first)
+        XCTAssertTrue(filtered.timeline.flatMap(\.records).allSatisfy { $0.source == .codex })
+    }
+    func testMacCombinedProjectSelectionRepairsAfterFilteringAndEmptyResults() throws {
+        let a = projectEntry("a", folder: "/demo/a", time: 60)
+        let b = projectEntry("b", folder: "/demo/b", provider: .claude)
+        let groups = JournalProjectGroup.build(from: [a, b])
+        let aid = try XCTUnwrap(groups.first(where: { $0.contains(a.threadKey) })?.id)
+        let bid = try XCTUnwrap(groups.first(where: { $0.contains(b.threadKey) })?.id)
+        XCTAssertEqual(JournalProjectGroup.selectedID(nil, preferredThread: b.threadKey, in: groups), bid)
+        XCTAssertEqual(JournalProjectGroup.selectedID(aid, preferredThread: b.threadKey, in: groups), aid)
+        XCTAssertEqual(JournalProjectGroup.selectedID(bid, preferredThread: b.threadKey,
+            in: JournalProjectGroup.build(from: [a])), aid)
+        XCTAssertNil(JournalProjectGroup.selectedID(aid, preferredThread: a.threadKey, in: []))
+        XCTAssertEqual(JournalProjectGroup.selectedID("missing", preferredThread: nil, in: groups), aid)
+    }
+    @MainActor
+    func testMacProjectGroupingNeverChangesNotesPlansOrModelInputs() async throws {
+        try write([meta("project-test"), codex("2026-10-09T02:00:00Z", "user", "Synthetic project")], to: codexFile)
+        let summarizer = MockSummarizer(), advisor = MockAgentAdvisor()
+        let store = JournalStore(directory: root.appendingPathComponent("store"), settings: settings,
+                                 summarizer: summarizer, advisor: advisor)
+        await store.refresh(on: Date())
+        let item = try XCTUnwrap(store.activities.first)
+        store.update(item, summary: "Synthetic manual note", nextStep: "Review", category: "研究", confirmed: true)
+        let note = store.draft(for: item)
+        let input = store.agentInput.fingerprint
+        let before = try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("store").path)
+        for _ in 0..<3 { _ = JournalProjectGroup.build(from: store.activities).flatMap(\.timeline) }
+        XCTAssertEqual(store.draft(for: item), note)
+        XCTAssertEqual(store.agentInput.fingerprint, input)
+        XCTAssertTrue(store.threadProgress.snapshots.isEmpty)
+        XCTAssertTrue(store.todayCalls.isEmpty)
+        XCTAssertEqual(summarizer.calls + advisor.calls, 0)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("store").path).sorted(), before.sorted())
+    }
+    func testMacProjectCopyIsBilingual() throws {
+        let en = JournalMacText(.english), zh = JournalMacText(.chinese)
+        for key in ["按项目", "跨天项目总览", "相同工作目录归为一个项目；展开后选择原线程。", "全部项目的线程", "项目如何分组？",
+                    "未记录完整目录 · 此线程单独展示", "已展开", "已收起", "展开项目，选择线程查看时间线；不会合并原会话。",
+                    "合并为一张卡片", "默认关闭。开启后整合已有摘要，不额外调用模型，也不合并原会话。",
+                    "一个项目一张卡片；右侧汇总每天的进展。", "最新进展", "已选中项目", "未选中项目",
+                    "选择项目，查看所有线程的每日进展。", "查看原线程时间线", "编辑最新摘要", "导出项目摘要",
+                    "项目的每一天", "同一天的进展集中展示；每段摘要仍属于原线程，可单独编辑。",
+                    "选择左侧的项目卡片", "选择一个项目，在这里一起查看各线程每天的进展。"] {
+            XCTAssertEqual(zh(key), key)
+            XCTAssertFalse(en(key) == key)
+        }
+        XCTAssertEqual(en("%d 组 · %d 个线程", 2, 3), "Groups: 2 · Threads: 3")
+        XCTAssertEqual(zh("%d 条每日记录 · %d 个记录日", 4, 2), "4 条每日记录 · 2 个记录日")
+        XCTAssertEqual(en("原线程（%d）", 3), "Original threads (3)")
+    }
+
     @MainActor
     func testMacFirstSummaryUnlocksAdviceWithoutEmptyCalls() async throws {
         try write([meta(), codex("2026-09-30T02:00:00Z", "user", "Synthetic first entry")], to: codexFile)

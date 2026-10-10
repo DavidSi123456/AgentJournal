@@ -29,6 +29,7 @@ Three short walkthroughs from the **English macOS demo**. All conversations and 
 - Day view: select a calendar day to see each thread's activity and editable summary draft.
 - Bilingual app interface (English / Simplified Chinese), independent of summary language (English / Simplified Chinese / Match discussion). First launch includes a highlighted tour on synthetic demo data, with a Codex / Claude Code / both source choice; reopen the tour or interactive demo from the question-mark menu. Change preferences in Settings (⌘,).
 - Thread view: find a thread and follow its daily progress on a timeline.
+- Project view (macOS): select **By project** to group Codex and Claude Code threads by full working-folder path, across dates. **Combine into one card** is off by default: expand a folder to browse individual thread cards. Turn it on for a single project card bringing existing notes together and a project-wide daily timeline. The **Original threads** menu keeps editing, task trees and return links available per thread. Same-named folders in different locations and subfolders stay separate; missing folders stay per-thread. Combining the display adds no model call and does not merge source sessions or model analysis.
 - **Progress advisor**: choose the model and compare threads using saved progress and next steps only. See up to three recommended continuations/reviews, explicit waiting conditions, confidence, and dated evidence. No planner deadlines, importance, category weighting, automatic messages, or task execution.
 - **Daily advice history**: advice, evidence, actual model and generation time are saved locally, with multiple analyses per day. Browse dates and versions without calling a model. Green calendar dots mark days with saved advice; the advisor uses a green/teal accent distinct from Codex blue and Claude orange.
 - **Editable task trees (local preview)**: draft a per-thread hierarchy from saved notes, edit tasks and stages, confirm completed leaf tasks, and revisit daily versions. Fixed goals show task-count progress after scope confirmation; open-ended research shows stages instead of a guessed percentage.
@@ -295,6 +296,7 @@ MIT. See [LICENSE](LICENSE). This implementation does not vendor code from other
 - **按天查看**：点击日历中的日期，查看当天各线程的活动和可编辑摘要草稿。
 - **中英文界面**：应用语言与摘要语言相互独立；摘要可以选择中文、英文或跟随讨论内容。首次打开时选择，之后可在设置（⌘,）中修改。
 - **按线程查看**：搜索线程，在时间线上回顾它每天的进展。
+- **按项目查看（macOS）**：选择“按项目”，将完整工作目录相同的 Codex／CC 线程跨天归组。“合并为一张卡片”默认关闭，展开文件夹仍显示各线程卡片；开启后，每个项目只显示一张整合已有摘要的卡片，右侧按天汇总各线程进展。“原线程”菜单保留编辑、任务树和返回原会话入口。不同位置的同名文件夹、子文件夹分别展示，缺少目录的线程单独保留；合并展示不额外调用模型，也不合并原会话或模型分析。
 - **推进助手**：自选模型，只根据已保存的进展和下一步比较线程，给出最多三条推进或核对建议，以及等待条件、置信度和带日期的依据。不使用日程计划的 DDL、重要度或分类权重，不自动发消息或执行任务。
 - **每日建议历史**：本地保存建议、依据、实际模型和生成时间；同一天可以保留多个版本。浏览历史不调用模型，日历中的绿色圆点表示当天有建议记录。
 - **可编辑任务树（本地预览）**：按线程从已保存摘要草拟目标与子项，支持手动修改、完成确认和每日版本回看。固定目标确认范围后展示子项完成率；开放式研究展示阶段，不猜测百分比。
